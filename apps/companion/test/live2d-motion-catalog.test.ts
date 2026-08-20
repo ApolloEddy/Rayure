@@ -15,6 +15,9 @@ test('Live2D motion catalog preserves model3 group/index and creates safe ids', 
         'Tap Body': [
           { File: 'motions/tap.motion3.json' },
         ],
+        'Tap-Body': [
+          { File: 'motions/tap-alt.motion3.json' },
+        ],
       },
     },
   })
@@ -40,6 +43,13 @@ test('Live2D motion catalog preserves model3 group/index and creates safe ids', 
       group: 'Tap Body',
       index: 0,
       file: 'motions/tap.motion3.json',
+    },
+    {
+      id: 'live2d-Tap-Body-0-1',
+      displayName: 'Tap-Body 1',
+      group: 'Tap-Body',
+      index: 0,
+      file: 'motions/tap-alt.motion3.json',
     },
   ])
 })

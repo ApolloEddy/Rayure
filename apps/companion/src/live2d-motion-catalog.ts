@@ -49,7 +49,10 @@ export function parseLive2dMotionCatalog(value: unknown): readonly PreparedLive2
       const baseId = createMotionId(group, index)
       let id = baseId
       let suffix = 1
-      while (usedIds.has(id)) id = `${baseId}-${suffix++}`.slice(0, 64)
+      while (usedIds.has(id)) {
+        const suffixText = `-${suffix++}`
+        id = `${baseId.slice(0, 64 - suffixText.length)}${suffixText}`
+      }
       usedIds.add(id)
       result.push({
         id,
@@ -68,8 +71,8 @@ function createMotionId(group: string, index: number): string {
   const slug = group
     .replace(/[^A-Za-z0-9._:-]+/gu, '-')
     .replace(/^-+|-+$/gu, '')
-    .slice(0, 48)
-  return `live2d-${slug || 'motion'}-${index}`.slice(0, 64)
+    .slice(0, Math.max(1, 64 - 'live2d-'.length - 1 - String(index).length))
+  return `live2d-${slug || 'motion'}-${index}`
 }
 
 function parseMotionPath(value: unknown, label: string): string {
