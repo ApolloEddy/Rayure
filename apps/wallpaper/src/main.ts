@@ -1,6 +1,6 @@
 import './style.css'
 
-import type { ModelDescriptor } from '@rayure/protocol'
+import type { Live2dMotionDescriptor, ModelDescriptor } from '@rayure/protocol'
 import { CompanionClient } from './companion-client.ts'
 import type { CompanionConnectionSnapshot } from './companion-client.ts'
 import {
@@ -58,6 +58,9 @@ const live2dQuerySurface = live2dNativeModelUrl === undefined
   })
 let live2dCompanionSurface: Live2dNativeDebugSurface | undefined
 let live2dCompanionGeneration = 0
+let live2dCompanionModel: ModelDescriptor | undefined
+let live2dCompanionMotionCatalog: readonly Live2dMotionDescriptor[] = []
+let pendingLive2dMotion: Live2dMotionDescriptor | undefined
 void live2dQuerySurface?.start()
 
 const companion = new CompanionClient({
@@ -68,15 +71,34 @@ const companion = new CompanionClient({
     void handleModelAvailable(model)
   },
   onMotionCatalog: (motions) => {
-    scene.updateMotionCatalog(motions)
+    live2dCompanionMotionCatalog = motions.filter((motion): motion is Live2dMotionDescriptor => motion.format === 'live2d')
+    live2dCompanionSurface?.updateMotionCatalog(motions)
+    scene.updateMotionCatalog(motions.filter(motion => motion.format === 'vmd'))
+    renderLive2dMotionToolbar(live2dCompanionMotionCatalog)
   },
   onEmotePlay: (payload) => {
+    if (live2dCompanionModel?.format === 'live2d') {
+      const motion = payload.motionId === undefined
+        ? undefined
+        : live2dCompanionMotionCatalog.find(item => item.id === payload.motionId)
+      if (motion !== undefined) requestLive2dMotion(motion)
+      return
+    }
     void scene.playEmote(payload)
   },
   onMotionPlay: (motion) => {
-    void scene.playMotion(motion)
+    if (motion.format === 'live2d' && live2dCompanionModel?.format === 'live2d') {
+      requestLive2dMotion(motion)
+      return
+    }
+    if (motion.format === 'vmd') void scene.playMotion(motion)
   },
   onMotionStop: (motionId) => {
+    if (live2dCompanionModel?.format === 'live2d') {
+      pendingLive2dMotion = undefined
+      live2dCompanionSurface?.stopMotion(motionId)
+      return
+    }
     scene.stopMotion(motionId)
   },
   onExpressionSet: (payload) => {
@@ -146,12 +168,18 @@ async function handleModelAvailable(model: ModelDescriptor): Promise<void> {
     live2dCompanionGeneration += 1
     live2dCompanionSurface?.dispose()
     live2dCompanionSurface = undefined
+    live2dCompanionModel = undefined
+    live2dCompanionMotionCatalog = []
+    pendingLive2dMotion = undefined
+    renderLive2dMotionToolbar([])
     void scene.loadModel(model)
     return
   }
 
   if (live2dQuerySurface !== undefined) return
   const generation = ++live2dCompanionGeneration
+  live2dCompanionModel = model
+  pendingLive2dMotion = undefined
   live2dCompanionSurface?.dispose()
   const surface = new Live2dNativeDebugSurface(stage, {
     modelUrl: model.url,
@@ -166,9 +194,27 @@ async function handleModelAvailable(model: ModelDescriptor): Promise<void> {
     },
   })
   live2dCompanionSurface = surface
+  surface.updateMotionCatalog(live2dCompanionMotionCatalog)
   const loaded = await surface.start()
   if (generation !== live2dCompanionGeneration) return
-  if (!loaded) renderLive2dModelStatus('error', model, 'Live2D model unavailable')
+  if (!loaded) {
+    renderLive2dModelStatus('error', model, 'Live2D model unavailable')
+    return
+  }
+  const requestedMotion = pendingLive2dMotion
+  pendingLive2dMotion = undefined
+  if (requestedMotion !== undefined) void surface.playMotion(requestedMotion)
+  else void surface.playDefaultMotion()
+}
+
+function requestLive2dMotion(motion: Live2dMotionDescriptor): void {
+  if (live2dCompanionModel?.format !== 'live2d') return
+  if (!live2dCompanionSurface?.isReady) {
+    pendingLive2dMotion = motion
+    return
+  }
+  pendingLive2dMotion = undefined
+  void live2dCompanionSurface.playMotion(motion)
 }
 
 function renderConnectionStatus(snapshot: CompanionConnectionSnapshot): void {
@@ -258,7 +304,7 @@ function renderLive2dDebug(snapshot: Live2dDebugSnapshot): void {
 function renderLive2dNativeDebug(snapshot: Live2dNativeDebugSnapshot): void {
   if (!live2dDebugPanel) return
   live2dDebugPanel.note.textContent = snapshot.nativeModelLoaded
-    ? `native Cubism model · ${snapshot.parameterIds.length} parameters`
+    ? `native Cubism model · ${snapshot.parameterIds.length} parameters${snapshot.activeMotionId === undefined ? '' : ` · ${snapshot.activeMotionId}`}`
     : `native Cubism model unavailable · ${snapshot.detail ?? 'loading'}`
   const entries = Object.entries(snapshot.parameters)
     .sort(([left], [right]) => left.localeCompare(right))
@@ -278,6 +324,38 @@ function requireElement(id: string): HTMLElement {
   const element = document.getElementById(id)
   if (!element) throw new Error(`Required wallpaper element is missing: ${id}`)
   return element
+}
+
+function renderLive2dMotionToolbar(motions: readonly Live2dMotionDescriptor[]): void {
+  const panel = document.getElementById('debug-panel')
+  if (!panel) return
+  const previous = panel.querySelector('[data-live2d-motion-group]')
+  previous?.remove()
+  if (motions.length === 0) return
+
+  const group = document.createElement('div')
+  group.className = 'debug-toolbar__group'
+  group.dataset.live2dMotionGroup = 'true'
+
+  const label = document.createElement('span')
+  label.className = 'debug-toolbar__label'
+  label.textContent = 'Live2D 原生动作'
+  const buttons = document.createElement('div')
+  buttons.className = 'debug-toolbar__buttons'
+  for (const motion of motions) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.dataset.live2dMotion = motion.id
+    button.textContent = `▶ ${motion.displayName}`
+    buttons.append(button)
+  }
+  const stop = document.createElement('button')
+  stop.type = 'button'
+  stop.dataset.live2dStop = 'true'
+  stop.textContent = '■ 停止 Live2D 动作'
+  buttons.append(stop)
+  group.append(label, buttons)
+  panel.append(group)
 }
 
 setupDebugToolbar(scene)
@@ -309,6 +387,19 @@ function setupDebugToolbar(activeScene: RayureScene): void {
       else {
         activeScene.setExpression(expr, 1.0, 150)
       }
+      return
+    }
+
+    const live2dMotionId = target.getAttribute('data-live2d-motion')
+    if (live2dMotionId) {
+      const motion = live2dCompanionMotionCatalog.find(item => item.id === live2dMotionId)
+      if (motion !== undefined) requestLive2dMotion(motion)
+      return
+    }
+
+    if (target.getAttribute('data-live2d-stop') === 'true') {
+      pendingLive2dMotion = undefined
+      live2dCompanionSurface?.stopMotion()
     }
   })
 }

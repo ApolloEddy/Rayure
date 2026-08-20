@@ -17,7 +17,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\audit-live2d-m
 
 ## 原生调试画布
 
-壁纸默认仍只显示现有 3D 回归基线。只有显式提供 `live2dModelUrl` 查询参数时，才会动态加载 `live2d-renderer`，创建原生 Cubism 调试画布，并用现有 Canonical Motion fixture 驱动 `ParamAngleX`、身体和手臂参数。
+壁纸默认仍保留现有 3D 回归基线；显式提供 `live2dModelUrl`，或让 Companion 通知 `format: live2d` 模型时，才会动态加载 `live2d-renderer`，创建原生 Cubism 调试画布，并用现有 Canonical Motion fixture 驱动 `ParamAngleX`、身体和手臂参数。
 
 先启动开发服务器：
 
@@ -43,14 +43,14 @@ $env:RAYURE_LOCAL_CONFIG = (Resolve-Path .\scratch\live2d-samples\Hiyori\rayure.
 pnpm dev:companion
 ```
 
-再启动 `pnpm dev:wallpaper`，Wallpaper 会在握手后收到令牌化 `model.available`，先重新校验 `model3.json`，再从 Companion 读取 MOC3、物理、动作和纹理并创建原生 Cubism 画布。PMX 仍由原有 3D 主机处理。
+再启动 `pnpm dev:wallpaper`，Wallpaper 会在握手后收到令牌化 `model.available`，先重新校验 `model3.json`，再从 Companion 读取 MOC3、物理、动作和纹理并创建原生 Cubism 画布。Companion 同时从 `FileReferences.Motions` 发出带 `group/index` 的动作目录；画布就绪后默认播放 `Idle`，调试栏会出现每个动作的播放按钮和停止按钮，可直接验证替换与中断。PMX 仍由原有 3D 主机处理。
 
 调试入口默认使用 Live2D 官方托管的 Cubism Core 地址；它不会被复制到仓库或构建产物。若浏览器或 Wallpaper Engine 环境离线，原生模型会显示明确的 Core 加载失败状态，而不会伪装成已加载模型。正式发布前仍需决定 Core 的合规获取、离线分发和 CEF 验收方式。
 
 ## 当前边界
 
 - Hiyori 是开发测试模型，不是 Rayure 的发布默认角色；
-- 当前原生调试画布已经能加载 `.model3.json` 并把 Canonical Motion 推到真实 Cubism 参数 sink，Companion 的 Live2D `model.available` 端到端加载也已打通；
-- Live2D 动作目录、动作打断/替换、离线 Core 来源和 Wallpaper Engine CEF 验收仍未闭合；
-- `Live2dNativeDebugSurface` 只在查询参数存在时创建，关闭页面或离开调试模式会释放模型、动作播放器和画布；
+- 当前原生调试画布已经能加载 `.model3.json` 并把 Canonical Motion 推到真实 Cubism 参数 sink，Companion 的 Live2D 模型、动作目录、默认 Idle、动作替换与停止端到端加载也已打通；
+- 离线 Core 来源和 Wallpaper Engine CEF 验收仍未闭合；
+- `Live2dNativeDebugSurface` 只在查询参数或 Companion Live2D 模型通知存在时创建，关闭页面或替换模型会释放模型、动作控制器和画布；
 - 3D 代码继续冻结为回归基线，不扩展新的 3D 场景、模型或动作能力。

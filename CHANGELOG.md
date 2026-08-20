@@ -14,6 +14,7 @@
 - Companion 本地配置现在接受绝对 `.model3.json` 入口，并在同一令牌根内提供 Live2D 的 JSON、MOC3、纹理和动作资源；磁盘路径与未允许扩展名仍不会进入协议或 HTTP 响应。
 - Live2D 动作描述符现在携带 `group`/`index`，Companion 会从 `.model3.json` 的 `FileReferences.Motions` 自动生成动作目录，并继续通过同一令牌根发放 `.motion3.json` URL。
 - Wallpaper 收到 `format: live2d` 的 `model.available` 后，会先校验 model3 清单，再创建原生 Cubism 画布；PMX 仍走原有 3D 主机，二者不会互相覆盖。
+- 新增原生 Live2D 动作控制器：默认播放 Idle、显式停止、动作替换/打断和迟到异步结果隔离；调试栏会根据 Companion 目录动态生成原生动作按钮。
 
 ### 变更
 
@@ -24,14 +25,15 @@
 
 - 对原生调试 URL 增加空值、长度、路径类型和回环地址校验，避免调试入口接收任意远程模型；
 - 原生模型加载失败时显示明确诊断并释放画布、动作播放器和模型实例，不把失败状态冒充为已加载。
+- 原生动作播放只接受当前 Live2D 目录中的 `group/index`，停止和替换会使旧 generation 失效；VMD 目录仍只进入冻结的 3D 主机。
 - 原生调试画布仅在 Cubism 模型完成异步加载后执行尺寸同步，避免布局观察器抢跑触发底层空模型错误。
 - 浏览器版 `path` shim 保留远程 Companion URL 的协议分隔符，避免 Live2D 资源请求错误回落到 Wallpaper 自身；Cubism 未完成初始化时释放也不再产生未处理异常。
 
 ### 架构影响
 
 - Live2D 主线从参数探针推进到“模型清单校验 → 原生 Cubism 参数驱动”的开发切片；
-- Companion 已完成“模型清单动作组 → 严格动作目录协议”的第一段，动作播放、中断/替换仍由 Wallpaper 原生表面接管；
-- Cubism Core 仍只通过调试时的官方托管地址加载，未复制到 Git、`dist` 或发布包；Live2D 动作播放/打断、离线 Core 来源和 Wallpaper Engine CEF 验收仍是下一步工作。
+- Companion 已完成“模型清单动作组 → 严格动作目录协议”，Wallpaper 已完成“目录 → 原生播放/停止/替换”的第二段；
+- Cubism Core 仍只通过调试时的官方托管地址加载，未复制到 Git、`dist` 或发布包；离线 Core 来源和 Wallpaper Engine CEF 验收仍是下一步工作。
 
 ## [0.5.1-dev] - 2026-08-20
 

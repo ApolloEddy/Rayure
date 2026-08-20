@@ -1,7 +1,9 @@
 import {
   createLive2dDebugMotion,
 } from './debug-probe.ts'
+import type { Live2dMotionDescriptor, MotionDescriptor } from '@rayure/protocol'
 import { parseLive2dModel3 } from './model-manifest.ts'
+import { Live2dMotionController } from './motion-controller.ts'
 import { Live2dMotionPlayer } from './motion-player.ts'
 import type { Live2dParameterSink } from './rig-profile.ts'
 
@@ -12,6 +14,15 @@ interface NativeLive2dModel {
   update(): void
   resize(): void
   destroy(destroyCubism?: boolean): void
+  startMotion(
+    group: string,
+    index: number,
+    priority: number,
+    onStartMotion?: () => void,
+    onEndMotion?: () => void,
+  ): Promise<unknown>
+  stopMotions(): void
+  getMotions?(): readonly string[]
   setParameter(parameterId: string, value: number): void
   getParameterNames?(): readonly string[]
   getParameterValue?(parameterId: string): number
@@ -23,6 +34,7 @@ export interface Live2dNativeDebugSnapshot {
   modelUrl: string
   parameterIds: readonly string[]
   parameters: Readonly<Record<string, number>>
+  activeMotionId?: string
   detail?: string
 }
 
@@ -43,6 +55,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
   readonly #coreUrl: string
   readonly #onSnapshot: ((snapshot: Live2dNativeDebugSnapshot) => void) | undefined
   readonly #motion = createLive2dDebugMotion()
+  readonly #nativeMotion = new Live2dMotionController()
   #canvas: HTMLCanvasElement | undefined
   #model: NativeLive2dModel | undefined
   #modelReady = false
@@ -53,6 +66,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
   #lastSnapshotAt = 0
   #parameterIds: readonly string[] = []
   #parameters = new Map<string, number>()
+  #motionCatalog: readonly Live2dMotionDescriptor[] = []
   #disposed = false
 
   constructor(container: HTMLElement, options: Live2dNativeDebugSurfaceOptions) {
@@ -110,6 +124,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
       await model.load(this.#modelUrl)
       if (this.#disposed) return false
       this.#modelReady = true
+      this.#nativeMotion.bindModel(model)
       this.#parameterIds = [...(model.getParameterNames?.() ?? [])]
       this.#player = new Live2dMotionPlayer(this)
       this.#player.bind(this.#motion)
@@ -142,6 +157,33 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
     this.#parameters.set(parameterId, value)
   }
 
+  get isReady(): boolean {
+    return !this.#disposed && this.#modelReady && this.#model !== undefined
+  }
+
+  updateMotionCatalog(motions: readonly MotionDescriptor[]): void {
+    if (this.#disposed) return
+    this.#motionCatalog = motions.filter((motion): motion is Live2dMotionDescriptor => motion.format === 'live2d')
+  }
+
+  playMotion(descriptor: MotionDescriptor): Promise<boolean> {
+    if (this.#disposed || descriptor.format !== 'live2d') return Promise.resolve(false)
+    if (this.#motionCatalog.length > 0 && !this.#motionCatalog.some(motion => motion.id === descriptor.id)) {
+      return Promise.resolve(false)
+    }
+    return this.#nativeMotion.playMotion(descriptor)
+  }
+
+  playDefaultMotion(): Promise<boolean> {
+    const defaultMotion = this.#motionCatalog.find(motion => motion.group.toLowerCase() === 'idle')
+      ?? this.#motionCatalog[0]
+    return defaultMotion === undefined ? Promise.resolve(false) : this.playMotion(defaultMotion)
+  }
+
+  stopMotion(motionId?: string): void {
+    this.#nativeMotion.stopMotion(motionId)
+  }
+
   snapshot(): Live2dNativeDebugSnapshot {
     return this.#snapshot()
   }
@@ -155,6 +197,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
     this.#resizeObserver?.disconnect()
     this.#resizeObserver = undefined
     this.#modelReady = false
+    this.#nativeMotion.dispose()
     this.#player?.dispose()
     this.#player = undefined
     try {
@@ -203,6 +246,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
       modelUrl: this.#modelUrl,
       parameterIds: this.#parameterIds,
       parameters,
+      ...(this.#nativeMotion.activeMotionId === undefined ? {} : { activeMotionId: this.#nativeMotion.activeMotionId }),
     }
   }
 
