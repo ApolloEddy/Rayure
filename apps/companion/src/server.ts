@@ -33,6 +33,8 @@ const ALLOWED_ASSET_EXTENSIONS = new Set([
   '.gif',
   '.jpeg',
   '.jpg',
+  '.json',
+  '.moc3',
   '.pmx',
   '.png',
   '.spa',
@@ -374,8 +376,13 @@ async function prepareModel(source: CompanionModelSource, assetToken: string): P
   }
   const entryFilePath = await realpath(source.entryFilePath)
   const metadata = await stat(entryFilePath)
-  if (!metadata.isFile() || extname(entryFilePath).toLowerCase() !== '.pmx') {
-    throw new Error('Companion model entry must be a regular PMX file')
+  const normalizedEntryPath = entryFilePath.toLowerCase()
+  const validEntry = source.format === 'live2d'
+    ? normalizedEntryPath.endsWith('.model3.json')
+    : extname(entryFilePath).toLowerCase() === '.pmx'
+  if (!metadata.isFile() || !validEntry) {
+    const label = source.format === 'live2d' ? 'Live2D model3.json' : 'PMX'
+    throw new Error(`Companion model entry must be a regular ${label} file`)
   }
   return {
     source: { ...source, entryFilePath },
@@ -578,6 +585,8 @@ function contentTypeFor(extension: string): string {
     '.gif': 'image/gif',
     '.jpeg': 'image/jpeg',
     '.jpg': 'image/jpeg',
+    '.json': 'application/json',
+    '.moc3': 'application/octet-stream',
     '.pmx': 'application/octet-stream',
     '.png': 'image/png',
     '.spa': 'image/bmp',

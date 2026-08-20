@@ -1,5 +1,6 @@
 import './style.css'
 
+import type { ModelDescriptor } from '@rayure/protocol'
 import { CompanionClient } from './companion-client.ts'
 import type { CompanionConnectionSnapshot } from './companion-client.ts'
 import {
@@ -14,6 +15,10 @@ import {
 import { RayureScene } from './scene.ts'
 import type { MmdModelStatus } from './mmd-model-host.ts'
 import type { Live2dDebugSnapshot } from './live2d/debug-probe.ts'
+import {
+  Live2dNativeDebugSurface,
+} from './live2d/native-debug-surface.ts'
+import type { Live2dNativeDebugSnapshot } from './live2d/native-debug-surface.ts'
 import type { WallpaperPropertyListener } from './wallpaper-api.ts'
 
 const BUILD = '0.2.0-m1'
@@ -23,7 +28,10 @@ const endpointLabel = requireElement('endpoint-label')
 const statusDot = requireElement('status-dot')
 const connectionPanel = requireElement('connection')
 const modelLabel = requireElement('model-label')
-const live2dDebugEnabled = new URLSearchParams(window.location.search).get('live2dDebug') === '1'
+const debugQuery = new URLSearchParams(window.location.search)
+const live2dParameterProbeEnabled = debugQuery.get('live2dDebug') === '1'
+const live2dNativeModelUrl = parseLocalLive2dDebugUrl(debugQuery.get('live2dModelUrl'))
+const live2dDebugEnabled = live2dParameterProbeEnabled || live2dNativeModelUrl !== undefined
 const live2dDebugPanel = live2dDebugEnabled ? createLive2dDebugPanel() : undefined
 
 declare global {
@@ -37,17 +45,27 @@ let companionPort = queryPort ?? DEFAULT_WALLPAPER_SETTINGS.companionPort
 let accent = { ...DEFAULT_WALLPAPER_SETTINGS.accent }
 const scene = new RayureScene(stage, accent, {
   onModelStatus: renderModelStatus,
-  live2dDebug: live2dDebugEnabled,
+  live2dDebug: live2dParameterProbeEnabled,
   onLive2dDebug: renderLive2dDebug,
 })
 window.__rayure_scene__ = scene
+
+const live2dQuerySurface = live2dNativeModelUrl === undefined
+  ? undefined
+  : new Live2dNativeDebugSurface(stage, {
+    modelUrl: live2dNativeModelUrl,
+    onSnapshot: renderLive2dNativeDebug,
+  })
+let live2dCompanionSurface: Live2dNativeDebugSurface | undefined
+let live2dCompanionGeneration = 0
+void live2dQuerySurface?.start()
 
 const companion = new CompanionClient({
   port: companionPort,
   build: BUILD,
   onStatus: renderConnectionStatus,
   onModelAvailable: (model) => {
-    void scene.loadModel(model)
+    void handleModelAvailable(model)
   },
   onMotionCatalog: (motions) => {
     scene.updateMotionCatalog(motions)
@@ -117,8 +135,41 @@ companion.start()
 
 window.addEventListener('beforeunload', () => {
   companion.stop()
+  live2dCompanionGeneration += 1
+  live2dQuerySurface?.dispose()
+  live2dCompanionSurface?.dispose()
   scene.dispose()
 }, { once: true })
+
+async function handleModelAvailable(model: ModelDescriptor): Promise<void> {
+  if (model.format === 'pmx') {
+    live2dCompanionGeneration += 1
+    live2dCompanionSurface?.dispose()
+    live2dCompanionSurface = undefined
+    void scene.loadModel(model)
+    return
+  }
+
+  if (live2dQuerySurface !== undefined) return
+  const generation = ++live2dCompanionGeneration
+  live2dCompanionSurface?.dispose()
+  const surface = new Live2dNativeDebugSurface(stage, {
+    modelUrl: model.url,
+    onSnapshot: (snapshot) => {
+      if (generation !== live2dCompanionGeneration) return
+      renderLive2dNativeDebug(snapshot)
+      renderLive2dModelStatus(
+        snapshot.nativeModelLoaded ? 'ready' : snapshot.detail === 'Loading Cubism Core and model' ? 'loading' : 'error',
+        model,
+        snapshot.detail,
+      )
+    },
+  })
+  live2dCompanionSurface = surface
+  const loaded = await surface.start()
+  if (generation !== live2dCompanionGeneration) return
+  if (!loaded) renderLive2dModelStatus('error', model, 'Live2D model unavailable')
+}
 
 function renderConnectionStatus(snapshot: CompanionConnectionSnapshot): void {
   endpointLabel.textContent = `127.0.0.1:${snapshot.port}`
@@ -153,6 +204,20 @@ function renderModelStatus(status: MmdModelStatus): void {
   }
 }
 
+function renderLive2dModelStatus(
+  phase: 'loading' | 'ready' | 'error',
+  model: ModelDescriptor,
+  detail?: string,
+): void {
+  modelLabel.dataset.state = phase
+  modelLabel.textContent = phase === 'loading'
+    ? `Loading ${model.displayName}`
+    : phase === 'ready'
+      ? model.displayName
+      : 'Live2D model unavailable'
+  modelLabel.title = detail ?? ''
+}
+
 function applyAccent(color: typeof accent): void {
   document.documentElement.style.setProperty('--accent', toCssColor(color))
   document.documentElement.style.setProperty('--accent-soft', toCssColor(color, 0.16))
@@ -161,6 +226,7 @@ function applyAccent(color: typeof accent): void {
 
 function createLive2dDebugPanel(): {
   root: HTMLElement
+  note: HTMLElement
   values: HTMLElement
 } {
   const root = document.createElement('aside')
@@ -168,24 +234,44 @@ function createLive2dDebugPanel(): {
   root.setAttribute('aria-live', 'polite')
 
   const title = document.createElement('strong')
-  title.textContent = 'Live2D debug probe'
+  title.textContent = 'Live2D debug'
   const note = document.createElement('span')
-  note.textContent = 'parameter path only · native Cubism model not loaded'
+  note.textContent = 'waiting for selected debug mode'
   const values = document.createElement('code')
   values.textContent = 'waiting for fixture'
   root.append(title, note, values)
   document.body.append(root)
-  return { root, values }
+  return { root, note, values }
 }
 
 function renderLive2dDebug(snapshot: Live2dDebugSnapshot): void {
   if (!live2dDebugPanel) return
+  live2dDebugPanel.note.textContent = 'parameter path only · native Cubism model not loaded'
   const entries = Object.entries(snapshot.parameters)
     .sort(([left], [right]) => left.localeCompare(right))
     .slice(0, 6)
   live2dDebugPanel.values.textContent = entries.length > 0
     ? entries.map(([id, value]) => `${id}=${value.toFixed(1)}`).join(' · ')
     : 'waiting for fixture'
+}
+
+function renderLive2dNativeDebug(snapshot: Live2dNativeDebugSnapshot): void {
+  if (!live2dDebugPanel) return
+  live2dDebugPanel.note.textContent = snapshot.nativeModelLoaded
+    ? `native Cubism model · ${snapshot.parameterIds.length} parameters`
+    : `native Cubism model unavailable · ${snapshot.detail ?? 'loading'}`
+  const entries = Object.entries(snapshot.parameters)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(0, 6)
+  live2dDebugPanel.values.textContent = entries.length > 0
+    ? entries.map(([id, value]) => `${id}=${value.toFixed(1)}`).join(' · ')
+    : snapshot.detail ?? 'waiting for native model'
+}
+
+function parseLocalLive2dDebugUrl(value: string | null): string | undefined {
+  if (value === null || value.trim() !== value || value.length === 0 || value.length > 2048) return undefined
+  if (value.startsWith('/@fs/') || /^https?:\/\/127\.0\.0\.1(?::\d{1,5})?\//u.test(value)) return value
+  return undefined
 }
 
 function requireElement(id: string): HTMLElement {

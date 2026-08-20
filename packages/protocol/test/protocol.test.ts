@@ -53,6 +53,34 @@ test('model availability accepts only a loopback HTTP asset URL', () => {
   }
 })
 
+test('model availability supports a tokenized Live2D model3 entry', () => {
+  const available = createServerModelAvailable({
+    id: 'live2d-message-1',
+    model: {
+      id: 'hiyori-debug',
+      displayName: 'Hiyori debug',
+      format: 'live2d',
+      url: 'http://127.0.0.1:32145/assets/0123456789abcdef/Hiyori.model3.json',
+    },
+  })
+  const parsed = parseServerMessage(JSON.stringify(available))
+  assert.deepEqual(parsed, available)
+  if (parsed.type !== 'model.available') assert.fail('expected model.available')
+  assert.equal(parsed.payload.model.format, 'live2d')
+})
+
+test('model availability rejects unsupported model formats', () => {
+  assert.throws(() => createServerModelAvailable({
+    id: 'model-message-3',
+    model: {
+      id: 'bad-model',
+      displayName: 'Bad model',
+      format: 'vrm' as never,
+      url: 'http://127.0.0.1:32145/assets/0123456789abcdef/model.vrm',
+    },
+  }), ProtocolValidationError)
+})
+
 test('wire parser rejects non-objects, unknown fields and unsupported messages', () => {
   const invalidPayloads = [
     '',
@@ -199,5 +227,4 @@ test('motion catalog and emote play messages round-trip through parser', () => {
   }))
   assert.equal(emote.type, 'emote.play')
 })
-
 

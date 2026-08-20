@@ -52,6 +52,13 @@ body::before {
   outline: none;
 }
 
+.live2d-native-debug-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
 .brand {
   position: fixed;
   top: clamp(24px, 4vw, 64px);

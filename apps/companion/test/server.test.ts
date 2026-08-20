@@ -151,6 +151,85 @@ test('authorized clients receive a tokenized model URL and only allowlisted file
   })).status, 404)
 })
 
+test('authorized clients receive a tokenized Live2D model3 package', async (t) => {
+  const assetRoot = await mkdtemp(join(tmpdir(), 'rayure-live2d-assets-'))
+  t.after(() => rm(assetRoot, { recursive: true, force: true }))
+  await mkdir(join(assetRoot, 'Hiyori.2048'))
+  await mkdir(join(assetRoot, 'motions'))
+  const modelBytes = Buffer.from('{"Version":3}')
+  const mocBytes = Buffer.from([0x4d, 0x4f, 0x43, 0x33])
+  const textureBytes = Buffer.from([137, 80, 78, 71])
+  const motionBytes = Buffer.from('{"Version":3}')
+  await writeFile(join(assetRoot, 'Hiyori.model3.json'), modelBytes)
+  await writeFile(join(assetRoot, 'Hiyori.moc3'), mocBytes)
+  await writeFile(join(assetRoot, 'Hiyori.2048', 'texture_00.png'), textureBytes)
+  await writeFile(join(assetRoot, 'motions', 'Hiyori_m01.motion3.json'), motionBytes)
+  await writeFile(join(assetRoot, 'source.blend'), 'private source')
+
+  const server = createCompanionServer({
+    port: 0,
+    helloTimeoutMs: 500,
+    createAssetToken: () => '0123456789abcdef0123456789abcdef',
+    model: {
+      id: 'hiyori-debug',
+      displayName: 'Hiyori debug',
+      format: 'live2d',
+      entryFilePath: join(assetRoot, 'Hiyori.model3.json'),
+    },
+  })
+  const address = await server.start()
+  t.after(() => server.stop())
+
+  const socket = new WebSocket(`ws://${address.host}:${address.port}/ws`, {
+    origin: 'http://127.0.0.1:4173',
+  })
+  t.after(() => socket.close())
+  await once(socket, 'open')
+  const messages = new Promise<[Buffer, Buffer]>((resolveMessages) => {
+    const received: Buffer[] = []
+    socket.on('message', (data) => {
+      received.push(Buffer.from(data as ArrayBuffer))
+      if (received.length === 2) resolveMessages([received[0]!, received[1]!])
+    })
+  })
+  socket.send(JSON.stringify(createClientHello({ id: 'hello-live2d-assets', build: 'test' })))
+
+  const [, modelData] = await messages
+  const modelMessage = parseServerMessage(modelData.toString())
+  assert.equal(modelMessage.type, 'model.available')
+  if (modelMessage.type !== 'model.available') assert.fail('expected model.available')
+  assert.equal(modelMessage.payload.model.format, 'live2d')
+  assert.equal(modelMessage.payload.model.url.includes(assetRoot), false)
+
+  const modelResponse = await fetch(modelMessage.payload.model.url, { headers: { Origin: 'null' } })
+  assert.equal(modelResponse.status, 200)
+  assert.deepEqual(Buffer.from(await modelResponse.arrayBuffer()), modelBytes)
+  assert.equal(modelResponse.headers.get('content-type'), 'application/json')
+
+  const mocResponse = await fetch(new URL('Hiyori.moc3', modelMessage.payload.model.url), {
+    headers: { Origin: 'null' },
+  })
+  assert.equal(mocResponse.status, 200)
+  assert.deepEqual(Buffer.from(await mocResponse.arrayBuffer()), mocBytes)
+
+  const textureResponse = await fetch(new URL('Hiyori.2048/texture_00.png', modelMessage.payload.model.url), {
+    method: 'HEAD',
+    headers: { Origin: 'null' },
+  })
+  assert.equal(textureResponse.status, 200)
+  assert.equal(textureResponse.headers.get('content-length'), String(textureBytes.byteLength))
+
+  const motionResponse = await fetch(new URL('motions/Hiyori_m01.motion3.json', modelMessage.payload.model.url), {
+    headers: { Origin: 'null' },
+  })
+  assert.equal(motionResponse.status, 200)
+  assert.deepEqual(Buffer.from(await motionResponse.arrayBuffer()), motionBytes)
+
+  assert.equal((await fetch(new URL('source.blend', modelMessage.payload.model.url), {
+    headers: { Origin: 'null' },
+  })).status, 403)
+})
+
 test('websocket upgrades reject non-loopback browser origins', async (t) => {
   const server = createCompanionServer({ port: 0, helloTimeoutMs: 500 })
   const address = await server.start()
@@ -229,4 +308,3 @@ test('authorized clients receive motion catalog with tokenized URLs', async (t) 
   assert.equal(response.status, 200)
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), vmdBytes)
 })
-

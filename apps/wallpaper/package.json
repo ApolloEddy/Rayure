@@ -12,6 +12,7 @@
   "dependencies": {
     "@rayure/protocol": "workspace:*",
     "@yohawing/three-mmd-loader": "0.8.1",
+    "live2d-renderer": "0.6.6",
     "three": "0.185.1"
   },
   "devDependencies": {

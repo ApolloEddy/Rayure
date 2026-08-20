@@ -53,7 +53,7 @@ export interface ServerErrorMessage {
 export interface ModelDescriptor {
   id: string
   displayName: string
-  format: 'pmx'
+  format: 'pmx' | 'live2d'
   url: string
 }
 
@@ -599,11 +599,13 @@ function requireErrorCode(value: unknown): ServerErrorCode {
 function requireModelDescriptor(value: unknown): ModelDescriptor {
   const model = requireRecord(value, 'model descriptor')
   requireExactKeys(model, ['id', 'displayName', 'format', 'url'], 'model descriptor')
-  if (model.format !== 'pmx') throw new ProtocolValidationError('model format must be pmx')
+  if (model.format !== 'pmx' && model.format !== 'live2d') {
+    throw new ProtocolValidationError('model format must be pmx or live2d')
+  }
   return {
     id: requireIdentifier(model.id, 'model id'),
     displayName: requireDisplayString(model.displayName, 'model displayName', 96),
-    format: 'pmx',
+    format: model.format,
     url: requireLoopbackAssetUrl(model.url),
   }
 }

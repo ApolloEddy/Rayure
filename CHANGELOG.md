@@ -2,6 +2,35 @@
 
 本项目的所有重要变更都会记录在此文件中。
 
+## [0.5.2-dev] - 2026-08-20
+
+### 新增
+
+- 选定 Live2D 官方 Cubism Web Samples 的 Hiyori 作为本机调试模型，并放入 Git 忽略的 `scratch/live2d-samples/Hiyori/`；审计结果为 17 个资源、70 个参数、标准 RigProfile 全部匹配；
+- 新增 `Live2dModelManifest` 校验器，拒绝模型资源绝对路径、目录穿越、重复资源和非法动作淡入淡出时间，并提供 MOC3 头校验和标准参数扫描；
+- 新增 `scripts/audit-live2d-model.ps1`，生成仅位于 `scratch/` 的模型审计报告；
+- 新增 `Live2dNativeDebugSurface`，通过显式 `live2dModelUrl` 查询参数加载真实 Cubism 模型，并将 Canonical Motion fixture 驱动到真实参数 sink；引入 `live2d-renderer@0.6.6` 作为开发适配层。
+- 共享 `model.available` 协议新增 `live2d` 模型格式，继续复用令牌化回环 URL 和严格字段校验。
+- Companion 本地配置现在接受绝对 `.model3.json` 入口，并在同一令牌根内提供 Live2D 的 JSON、MOC3、纹理和动作资源；磁盘路径与未允许扩展名仍不会进入协议或 HTTP 响应。
+- Wallpaper 收到 `format: live2d` 的 `model.available` 后，会先校验 model3 清单，再创建原生 Cubism 画布；PMX 仍走原有 3D 主机，二者不会互相覆盖。
+
+### 变更
+
+- Vite 开发服务器只额外允许读取 `scratch/`，原生调试画布不改变默认 3D 回归页面或发布目录；
+- README 与 Hiyori 调试文档补充模型审计、URL 生成和 Core 离线边界。
+
+### 修复
+
+- 对原生调试 URL 增加空值、长度、路径类型和回环地址校验，避免调试入口接收任意远程模型；
+- 原生模型加载失败时显示明确诊断并释放画布、动作播放器和模型实例，不把失败状态冒充为已加载。
+- 原生调试画布仅在 Cubism 模型完成异步加载后执行尺寸同步，避免布局观察器抢跑触发底层空模型错误。
+- 浏览器版 `path` shim 保留远程 Companion URL 的协议分隔符，避免 Live2D 资源请求错误回落到 Wallpaper 自身；Cubism 未完成初始化时释放也不再产生未处理异常。
+
+### 架构影响
+
+- Live2D 主线从参数探针推进到“模型清单校验 → 原生 Cubism 参数驱动”的开发切片；
+- Cubism Core 仍只通过调试时的官方托管地址加载，未复制到 Git、`dist` 或发布包；Live2D 动作目录、离线 Core 来源和 Wallpaper Engine CEF 验收仍是下一步工作。
+
 ## [0.5.1-dev] - 2026-08-20
 
 ### 新增

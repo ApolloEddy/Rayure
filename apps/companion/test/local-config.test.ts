@@ -34,6 +34,30 @@ test('local config resolves one existing PMX without exposing extra fields', asy
   assert.equal(config.model?.displayName, 'Local test model')
 })
 
+test('local config resolves a Live2D model3 entry without exposing extra fields', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'rayure-config-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const modelPath = join(root, 'Hiyori.model3.json')
+  const configPath = join(root, 'rayure.local.json')
+  await writeFile(modelPath, '{"Version":3}')
+  await writeFile(configPath, JSON.stringify({
+    model: {
+      id: 'hiyori-debug',
+      displayName: 'Hiyori debug',
+      format: 'live2d',
+      path: modelPath,
+    },
+  }))
+
+  const config = await loadLocalConfig(configPath)
+  assert.deepEqual(config.model, {
+    id: 'hiyori-debug',
+    displayName: 'Hiyori debug',
+    format: 'live2d',
+    entryFilePath: modelPath,
+  })
+})
+
 test('local config rejects malformed JSON, unknown fields and unsafe model inputs', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'rayure-config-'))
   t.after(() => rm(root, { recursive: true, force: true }))
@@ -48,6 +72,7 @@ test('local config rejects malformed JSON, unknown fields and unsafe model input
     { model: { id: 'model', displayName: 'Model', format: 'fbx', path: 'model.fbx' } },
     { model: { id: 'model', displayName: 'Model', format: 'pmx', path: 'relative.pmx' } },
     { model: { id: 'model', displayName: 'Model', format: 'pmx', path: join(root, 'missing.pmx') } },
+    { model: { id: 'model', displayName: 'Model', format: 'live2d', path: join(root, 'model.json') } },
     { model: { id: 'model', displayName: 'Model', format: 'pmx', path: join(root, 'model.pmx'), extra: true } },
   ]
 
@@ -88,4 +113,3 @@ test('local config resolves configured motions and rejects invalid motion paths'
   }))
   await assert.rejects(loadLocalConfig(configPath), /format|vmd/i)
 })
-

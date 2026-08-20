@@ -51,17 +51,23 @@ export async function loadLocalConfig(
     requireExactKeys(model, ['id', 'displayName', 'format', 'path'], 'model')
     const id = requireIdentifier(model.id)
     const displayName = requireDisplayName(model.displayName)
-    if (model.format !== 'pmx') throw new Error('Configured model format must be pmx')
-    const configuredPath = requireAbsolutePmxPath(model.path)
+    if (model.format !== 'pmx' && model.format !== 'live2d') {
+      throw new Error('Configured model format must be pmx or live2d')
+    }
+    const format = model.format
+    const configuredPath = format === 'pmx'
+      ? requireAbsolutePmxPath(model.path)
+      : requireAbsoluteLive2dPath(model.path)
 
     try {
       const entryFilePath = await realpath(configuredPath)
       const metadata = await stat(entryFilePath)
       if (!metadata.isFile()) throw new Error('path is not a regular file')
-      resolvedModel = { id, displayName, format: 'pmx', entryFilePath }
+      resolvedModel = { id, displayName, format, entryFilePath }
     }
     catch (cause) {
-      throw new Error(`Configured PMX model must exist as a regular file: ${toErrorMessage(cause)}`)
+      const label = format === 'live2d' ? 'Live2D model3' : 'PMX'
+      throw new Error(`Configured ${label} model must exist as a regular file: ${toErrorMessage(cause)}`)
     }
   }
 
@@ -152,6 +158,22 @@ function requireAbsolutePmxPath(value: unknown): string {
     throw new Error('Configured model path must be an absolute PMX path')
   }
   if (extname(value).toLowerCase() !== '.pmx') throw new Error('Configured model path must reference a PMX file')
+  return value
+}
+
+function requireAbsoluteLive2dPath(value: unknown): string {
+  if (
+    typeof value !== 'string'
+    || value.length < 1
+    || value.trim() !== value
+    || value.includes('\u0000')
+    || !isAbsolute(value)
+  ) {
+    throw new Error('Configured model path must be an absolute Live2D model3.json path')
+  }
+  if (!value.toLowerCase().endsWith('.model3.json')) {
+    throw new Error('Configured model path must reference a Live2D model3.json file')
+  }
   return value
 }
 
