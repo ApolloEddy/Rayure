@@ -184,11 +184,13 @@ async function handleModelAvailable(model: ModelDescriptor): Promise<void> {
   live2dCompanionModel = model
   pendingLive2dMotion = undefined
   live2dCompanionSurface?.dispose()
+  let latestSnapshot: Live2dNativeDebugSnapshot | undefined
   const surface = new Live2dNativeDebugSurface(stage, {
     modelUrl: model.url,
     ...(live2dCoreUrl === undefined ? {} : { coreUrl: live2dCoreUrl }),
     onSnapshot: (snapshot) => {
       if (generation !== live2dCompanionGeneration) return
+      latestSnapshot = snapshot
       renderLive2dNativeDebug(snapshot)
       renderLive2dModelStatus(
         snapshot.nativeModelLoaded ? 'ready' : snapshot.detail === 'Loading Cubism Core and model' ? 'loading' : 'error',
@@ -202,7 +204,7 @@ async function handleModelAvailable(model: ModelDescriptor): Promise<void> {
   const loaded = await surface.start()
   if (generation !== live2dCompanionGeneration) return
   if (!loaded) {
-    renderLive2dModelStatus('error', model, 'Live2D model unavailable')
+    renderLive2dModelStatus('error', model, latestSnapshot?.detail ?? 'Live2D model unavailable')
     return
   }
   const requestedMotion = pendingLive2dMotion
