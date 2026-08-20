@@ -21,7 +21,7 @@ Rayure Behavior
 
 `CHANGELOG.md` 已记录到 `0.5.2-dev`（此前的 3D 记录为 0.4.8），但根工作区和各 package manifest 仍标记为 0.2.0。本仓库因此应视为开发快照，而不是已经完成版本统一的正式发布版。
 
-当前统一验证中 78 项测试通过，TypeScript 与生产构建均通过；原生 Cubism 画布和 Companion Live2D 模型/动作通道仍仅供本机调试，Core 来源和 CEF 离线验收尚未闭合。3D 继续作为冻结回归基线。
+当前统一验证中 81 项测试通过，TypeScript 与生产构建均通过；原生 Cubism 画布和 Companion Live2D 模型/动作通道仍仅供本机调试，Core 已具备受控来源和显式失败边界，离线 Core 与 CEF 实机验收仍未闭合。3D 继续作为冻结回归基线。
 
 ## 已实现
 
@@ -53,7 +53,7 @@ Wallpaper Engine / CEF
        `- future ASR / LLM / TTS / Vision adapters
 ```
 
-详细设计见 [目标架构](docs/architecture.md)，旧项目的保留、改造和淘汰项见 [迁移矩阵](docs/migration-matrix.md)，现有基础验收见 [M0](docs/acceptance/m0-foundation.md) 与 [M1](docs/acceptance/m1-wallpaper-engine-pmx.md)。
+详细设计见 [目标架构](docs/architecture.md)，旧项目的保留、改造和淘汰项见 [迁移矩阵](docs/migration-matrix.md)，现有基础验收见 [M0](docs/acceptance/m0-foundation.md)、[M1](docs/acceptance/m1-wallpaper-engine-pmx.md) 与 [M2 Live2D](docs/acceptance/m2-live2d.md)。
 
 ## 当前 Live2D 开发切片
 
@@ -66,12 +66,13 @@ Wallpaper Engine / CEF
 - `apps/wallpaper/src/live2d/debug-probe.ts`：仅在 `?live2dDebug=1` 下启用的参数链路探针；它不携带 Cubism Core 或角色像素。
 - `apps/wallpaper/src/live2d/model-manifest.ts`：校验 `.model3.json` 的相对资源引用，并扫描模型参数与标准 RigProfile 的匹配情况；
 - `apps/wallpaper/src/live2d/native-debug-surface.ts`：仅在显式 `?live2dModelUrl=...` 或 Companion 的 `live2d` 模型通知下动态加载原生 Cubism 调试画布；
+- `apps/wallpaper/src/live2d/core-source.ts`：固定官方默认 Core，并只允许精确官方地址、同源调试文件或回环 `.js` 地址；
 - `apps/wallpaper/src/live2d/motion-controller.ts`：为原生 Cubism 动作提供目录校验、默认 Idle、停止、打断/替换和异步 generation 隔离；
 - `scripts/audit-live2d-model.ps1` 与 [Hiyori 原生调试说明](docs/live2d-hiyori-debug.md)：审计官方 Hiyori 开发模型的 17 个资源和 70 个参数。
 - `packages/protocol`、Companion 与 Wallpaper 已支持 `model.available` 的 `live2d` 格式；Companion 通过令牌化只读 URL 提供整个 `.model3.json` 资源根，Wallpaper 会先校验清单再加载原生模型。
 - Companion 会从 Live2D `.model3.json` 的 `FileReferences.Motions` 自动生成带 `group`/`index` 的动作目录，并以令牌化 `.motion3.json` URL 暴露资源。
 
-当前入口已经把 Canonical Motion fixture 接到真实 Cubism 参数 sink，并完成 Companion → Wallpaper 的 Hiyori 模型、动作目录、默认 Idle、动作替换与停止端到端加载；下一步是处理可配置的 Core 来源与 CEF/离线验收。
+当前入口已经把 Canonical Motion fixture 接到真实 Cubism 参数 sink，并完成 Companion → Wallpaper 的 Hiyori 模型、动作目录、默认 Idle、动作替换与停止端到端加载；Core 来源已接入查询参数和 Companion 表面，并在加载前显式失败闭环；下一步是完成离线 Core 文件验收与 Wallpaper Engine CEF 实机验收。
 
 现有外部 PMX 角色不能可靠地一键转换为原生 Live2D；官方 Cubism 工作流要求分层 PSD、ArtMesh 和变形器。若只需要本机调试，可运行 [`scripts/prepare-hutao-live2d-debug.ps1`](scripts/prepare-hutao-live2d-debug.ps1)，让外部 PMX 作为视觉参照，同时打开 `?live2dDebug=1` 验证参数链路。调试资源、配置和审计报告均不进入 Git、`dist` 或发布包，详见 [胡桃 L2D 调试边界](docs/live2d-hutao-debug.md)。
 
@@ -143,6 +144,7 @@ P0 只做两件事：确认私人资源不会进入 Git、`dist` 或发布目录
 ## 尚未完成
 
 - Cubism Web SDK、Live2D 模型导入、ArtMesh/Deformer 绑定与一次性 RigProfile 标定；
+- 合规获取的离线 Cubism Core 文件、包外调试配置和 Wallpaper Engine CEF 实机验收；
 - ARDY/DiP 等生成式动作后端的本机实测与选型；
 - Canonical Motion Buffer、跨后端动作约束与执行回执；
 - Motion Semantic Feature 预置库、动态缓存和 Text Encoder API；

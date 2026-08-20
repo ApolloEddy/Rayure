@@ -81,6 +81,17 @@ try {
         throw "Private/model assets entered the wallpaper build:`n$($privateAssets.FullName -join "`n")"
     }
 
+    $live2dPrivateAssets = Get-ChildItem -LiteralPath $distRoot -Recurse -File |
+        Where-Object {
+            $_.Name -match '(?i)\.model3\.json$' -or
+            $_.Name -match '(?i)\.moc3$' -or
+            $_.Name -match '(?i)\.motion3\.json$' -or
+            $_.Name -match '(?i)live2dcubismcore.*\.js$'
+        }
+    if ($live2dPrivateAssets) {
+        throw "Private Live2D model/Core assets entered the wallpaper build:`n$($live2dPrivateAssets.FullName -join "`n")"
+    }
+
     $trackedFiles = @(git ls-files)
     if ($LASTEXITCODE -ne 0) {
         throw "Git tracked-file boundary check failed with exit code $LASTEXITCODE"

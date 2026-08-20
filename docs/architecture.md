@@ -70,6 +70,7 @@ M1 允许 `client.hello → server.welcome/server.error → model.available`。`
 - 渲染循环遵守用户设置的 FPS，而不是锁死刷新率：[FPS Limiter](https://docs.wallpaperengine.io/en/web/performance/fps.html)。
 - CEF 与普通 Chrome 并非完全等价；浏览器测试只算技术预检，最终必须通过 Wallpaper Engine 的 CEF 调试入口复核：[Web Wallpaper Debugging](https://docs.wallpaperengine.io/en/web/debug/debug.html)。
 - Wallpaper Engine 导入时会复制所选目录的全部内容，故 `dist/` 必须是独立、最小、无私有资产的发布目录。
+- Cubism Core 只在 Live2D 调试表面创建前按受控来源加载：默认是固定官方地址，离线调试只能显式提供同源/回环 `.js` 文件；Core 不复制进 `public/`、`dist/` 或发布包。
 
 ## 4. 数据流
 
@@ -94,6 +95,18 @@ Companion reads ignored rayure.local.json
   → Renderer loads PMX and relative textures
   → complete model is fitted and atomically committed
   → superseded/failed models are disposed without replacing the current model
+```
+
+### Live2D 调试链路
+
+```text
+Companion reads ignored Live2D model3 config
+  → tokenized read-only model/motion/resource URLs
+  → Wallpaper validates model3 manifest
+  → resolveLive2dCoreUrl accepts fixed official/same-origin/loopback JS only
+  → preloads Cubism Core and surfaces script failures
+  → live2d-renderer loads model and native motion catalog
+  → failed/superseded surfaces dispose canvas, model and motion controller
 ```
 
 ### 目标语音链路

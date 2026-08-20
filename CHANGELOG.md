@@ -21,7 +21,8 @@
 ### 变更
 
 - Vite 开发服务器只额外允许读取 `scratch/`，原生调试画布不改变默认 3D 回归页面或发布目录；
-- README 与 Hiyori 调试文档补充模型审计、URL 生成和 Core 离线边界。
+- README、Hiyori 调试文档和 M2 验收单补充模型审计、Core 来源、在线/离线失败边界及 CEF 未关闭项。
+- `scripts/verify.ps1` 增加 `.model3.json`、`.moc3`、`.motion3.json` 和 Cubism Core 文件名的构建产物拦截。
 
 ### 修复
 
@@ -40,6 +41,7 @@
 - Companion 已完成“模型清单动作组 → 严格动作目录协议”，Wallpaper 已完成“目录 → 原生播放/停止/替换”的第二段；
 - Core 来源先经过独立的安全契约，再进入原生表面；查询参数和 Companion 创建的表面共用同一受控来源；本地 Core 只作为调试输入，不改变正式构建的资源边界；
 - Cubism Core 仍只通过调试时的官方托管地址加载，未复制到 Git、`dist` 或发布包；离线 Core 来源和 Wallpaper Engine CEF 验收仍是下一步工作。
+- M2 的浏览器预检已形成可重复验收单，但真实 Wallpaper Engine CEF 仍是独立关闭条件。
 
 ## [0.5.1-dev] - 2026-08-20
 
