@@ -15,6 +15,7 @@
 - Live2D 动作描述符现在携带 `group`/`index`，Companion 会从 `.model3.json` 的 `FileReferences.Motions` 自动生成动作目录，并继续通过同一令牌根发放 `.motion3.json` URL。
 - Wallpaper 收到 `format: live2d` 的 `model.available` 后，会先校验 model3 清单，再创建原生 Cubism 画布；PMX 仍走原有 3D 主机，二者不会互相覆盖。
 - 新增原生 Live2D 动作控制器：默认播放 Idle、显式停止、动作替换/打断和迟到异步结果隔离；调试栏会根据 Companion 目录动态生成原生动作按钮。
+- 新增 Cubism Core 来源解析器：默认继续使用官方固定地址，可显式使用同源调试文件或回环 `.js` 地址；任意远程主机、危险协议、查询串和非脚本扩展名均拒绝。
 
 ### 变更
 
@@ -34,6 +35,7 @@
 
 - Live2D 主线从参数探针推进到“模型清单校验 → 原生 Cubism 参数驱动”的开发切片；
 - Companion 已完成“模型清单动作组 → 严格动作目录协议”，Wallpaper 已完成“目录 → 原生播放/停止/替换”的第二段；
+- Core 来源先经过独立的安全契约，再进入原生表面；本地 Core 只作为调试输入，不改变正式构建的资源边界；
 - Cubism Core 仍只通过调试时的官方托管地址加载，未复制到 Git、`dist` 或发布包；离线 Core 来源和 Wallpaper Engine CEF 验收仍是下一步工作。
 
 ## [0.5.1-dev] - 2026-08-20
