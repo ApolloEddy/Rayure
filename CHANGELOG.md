@@ -13,6 +13,7 @@
 - 新增 ARDY CoreSkeleton27 适配器，严格要求官方 27 关节顺序，将 `Head`、`LeftForeArm`、`RightHand` 等输出映射到 Live2D RigProfile 可消费的 Canonical Motion 名称，并校验帧顺序、四元数、脚接触和缺失关节；
 - 新增 Companion Motion Semantic Runtime：启动时加载包外预置缓存，API miss 成功后以原子替换写回同一缓存文件；无 Text Encoder 配置时保持明确的 cache-only 模式；
 - 新增 ARDY JSONL 进程协议：生成请求携带缓存特征、历史动作和 27 关节运动学约束，结果必须回传同一 requestId 后才进入 CoreSkeleton27 转换器，取消和结构化错误均有独立消息形态；
+- 新增 `ArdyProcessClient`：以 `shell:false` 启动包外 Bridge，串行发送 JSONL 请求，限制命令/参数、捕获有限 stderr 诊断，支持超时、取消、关闭和迟到结果隔离；
 - 选定 Live2D 官方 Cubism Web Samples 的 Hiyori 作为本机调试模型，并放入 Git 忽略的 `scratch/live2d-samples/Hiyori/`；审计结果为 17 个资源、70 个参数、标准 RigProfile 全部匹配；
 - 新增 `Live2dModelManifest` 校验器，拒绝模型资源绝对路径、目录穿越、重复资源和非法动作淡入淡出时间，并提供 MOC3 头校验和标准参数扫描；
 - 新增 `scripts/audit-live2d-model.ps1`，生成仅位于 `scratch/` 的模型审计报告；
@@ -52,6 +53,7 @@
 - ARDY 适配目前只接收规范化动作帧并输出 `rayure.motion.v1`，不启动 Python、下载 checkpoint 或把 ARDY/角色资产写入仓库；
 - `rayure.local.json` 现在可声明包外 `motionSemantic.cachePath` 与可选 Text Encoder endpoint；配置只保存路径/端点/超时，不保存 API Key，也不把特征数据放进 Wallpaper 构建产物；
 - ARDY 进程协议仍是纯合同，尚未启动外部命令或下载权重；它把模型生命周期留在 Companion 侧，Renderer 只会接收经过验证的 Canonical Motion；
+- ARDY 进程客户端的取消路径会终止当前 Bridge，避免旧生成结果进入下一次动作替换；实际 Bridge/权重仍保持仓库外，当前夹具使用临时 Node 子进程替代；
 - Live2D 主线从参数探针推进到“模型清单校验 → 原生 Cubism 参数驱动”的开发切片；
 - Companion 已完成“模型清单动作组 → 严格动作目录协议”，Wallpaper 已完成“目录 → 原生播放/停止/替换”的第二段；
 - Core 来源先经过独立的安全契约，再进入原生表面；查询参数和 Companion 创建的表面共用同一受控来源；本地 Core 只作为调试输入，不改变正式构建的资源边界；
