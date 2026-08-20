@@ -10,6 +10,7 @@
 - 新增 Companion 缓存优先的 `CachedMotionSemanticFeatureResolver`：命中本地特征时不调用编码器，未命中时传递可取消信号给 Text Encoder，并仅在返回特征的缓存键与规范化 Prompt 完全匹配后写回缓存；
 - 新增版本化的 `rayure.motion-semantic-cache.v1` 文件读写器，使用 Base64 二进制块保存 FP16/FP32 特征并按位保存 token mask，写入采用临时文件替换，损坏 JSON、重复键、未知字段和错误字节长度均拒绝；
 - 新增统一 `TextEncoderApiClient`，以 `rayure.text-encoder-request.v1/response.v1` 交换缓存键、Prompt 和紧凑特征块，支持超时/取消，并只接受 HTTPS 或回环 HTTP 端点；
+- 新增 ARDY CoreSkeleton27 适配器，严格要求官方 27 关节顺序，将 `Head`、`LeftForeArm`、`RightHand` 等输出映射到 Live2D RigProfile 可消费的 Canonical Motion 名称，并校验帧顺序、四元数、脚接触和缺失关节；
 - 选定 Live2D 官方 Cubism Web Samples 的 Hiyori 作为本机调试模型，并放入 Git 忽略的 `scratch/live2d-samples/Hiyori/`；审计结果为 17 个资源、70 个参数、标准 RigProfile 全部匹配；
 - 新增 `Live2dModelManifest` 校验器，拒绝模型资源绝对路径、目录穿越、重复资源和非法动作淡入淡出时间，并提供 MOC3 头校验和标准参数扫描；
 - 新增 `scripts/audit-live2d-model.ps1`，生成仅位于 `scratch/` 的模型审计报告；
@@ -46,6 +47,7 @@
 - Companion 的特征解析状态现在闭合为“cache hit → 直接返回 / cache miss → 外部编码 → 身份校验 → 内存缓存”，尚未引入磁盘写入或 ARDY 进程，避免把实验模型耦合进壁纸生命周期；
 - 预置特征现在有独立的包外文件边界；文件数据不会进入 Companion WebSocket 或 Wallpaper `dist`，后续 Text Encoder fallback 可在完成路径配置后增量写回该缓存；
 - 外部编码器只作为低频 fallback，API 凭据不进入请求合同或代码；远程明文 HTTP、URL 凭据、查询串和跨身份响应均在客户端边界拒绝；
+- ARDY 适配目前只接收规范化动作帧并输出 `rayure.motion.v1`，不启动 Python、下载 checkpoint 或把 ARDY/角色资产写入仓库；
 - Live2D 主线从参数探针推进到“模型清单校验 → 原生 Cubism 参数驱动”的开发切片；
 - Companion 已完成“模型清单动作组 → 严格动作目录协议”，Wallpaper 已完成“目录 → 原生播放/停止/替换”的第二段；
 - Core 来源先经过独立的安全契约，再进入原生表面；查询参数和 Companion 创建的表面共用同一受控来源；本地 Core 只作为调试输入，不改变正式构建的资源边界；
