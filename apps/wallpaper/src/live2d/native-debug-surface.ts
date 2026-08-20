@@ -2,12 +2,16 @@ import {
   createLive2dDebugMotion,
 } from './debug-probe.ts'
 import type { Live2dMotionDescriptor, MotionDescriptor } from '@rayure/protocol'
+import {
+  DEFAULT_LIVE2D_CORE_URL,
+  resolveLive2dCoreUrl,
+} from './core-source.ts'
 import { parseLive2dModel3 } from './model-manifest.ts'
 import { Live2dMotionController } from './motion-controller.ts'
 import { Live2dMotionPlayer } from './motion-player.ts'
 import type { Live2dParameterSink } from './rig-profile.ts'
 
-const DEFAULT_CUBISM_CORE_URL = 'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js'
+const coreScriptLoads = new Map<string, Promise<void>>()
 
 interface NativeLive2dModel {
   load(link: string): Promise<void>
@@ -32,6 +36,7 @@ export interface Live2dNativeDebugSnapshot {
   mode: 'native-cubism'
   nativeModelLoaded: boolean
   modelUrl: string
+  coreUrl: string
   parameterIds: readonly string[]
   parameters: Readonly<Record<string, number>>
   activeMotionId?: string
@@ -73,7 +78,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
     if (!options.modelUrl || !options.modelUrl.trim()) throw new Error('Live2D native debug model URL is required')
     this.#container = container
     this.#modelUrl = options.modelUrl
-    this.#coreUrl = options.coreUrl ?? DEFAULT_CUBISM_CORE_URL
+    this.#coreUrl = resolveLive2dCoreUrl(options.coreUrl, window.location.href) ?? DEFAULT_LIVE2D_CORE_URL
     this.#onSnapshot = options.onSnapshot
   }
 
@@ -83,6 +88,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
       mode: 'native-cubism',
       nativeModelLoaded: false,
       modelUrl: this.#modelUrl,
+      coreUrl: this.#coreUrl,
       parameterIds: [],
       parameters: {},
       detail: 'Loading Cubism Core and model',
@@ -96,6 +102,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
         throw new Error(`Live2D model3 request failed with HTTP ${modelResponse.status}`)
       }
       parseLive2dModel3(await modelResponse.json())
+      await ensureCoreScript(this.#coreUrl)
 
       const { Live2DCubismModel } = await import('live2d-renderer')
       const canvas = document.createElement('canvas')
@@ -142,6 +149,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
         mode: 'native-cubism',
         nativeModelLoaded: false,
         modelUrl: this.#modelUrl,
+        coreUrl: this.#coreUrl,
         parameterIds: [],
         parameters: {},
         detail,
@@ -244,6 +252,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
       mode: 'native-cubism',
       nativeModelLoaded: this.#modelReady,
       modelUrl: this.#modelUrl,
+      coreUrl: this.#coreUrl,
       parameterIds: this.#parameterIds,
       parameters,
       ...(this.#nativeMotion.activeMotionId === undefined ? {} : { activeMotionId: this.#nativeMotion.activeMotionId }),
@@ -258,4 +267,24 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
       // Diagnostics callbacks cannot own the model lifecycle.
     }
   }
+}
+
+function ensureCoreScript(url: string): Promise<void> {
+  const existing = coreScriptLoads.get(url)
+  if (existing) return existing
+
+  const promise = new Promise<void>((resolve, reject) => {
+    const script = document.createElement('script')
+    script.async = false
+    script.src = url
+    script.dataset.rayureCubismCore = 'true'
+    script.onload = () => resolve()
+    script.onerror = () => reject(new Error(`Cubism Core could not be loaded from ${url}`))
+    ;(document.head ?? document.body).append(script)
+  })
+  coreScriptLoads.set(url, promise)
+  promise.catch(() => {
+    if (coreScriptLoads.get(url) === promise) coreScriptLoads.delete(url)
+  })
+  return promise
 }

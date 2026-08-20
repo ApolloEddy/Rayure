@@ -19,6 +19,7 @@ import {
   Live2dNativeDebugSurface,
 } from './live2d/native-debug-surface.ts'
 import type { Live2dNativeDebugSnapshot } from './live2d/native-debug-surface.ts'
+import { resolveLive2dCoreUrl } from './live2d/core-source.ts'
 import type { WallpaperPropertyListener } from './wallpaper-api.ts'
 
 const BUILD = '0.2.0-m1'
@@ -31,6 +32,7 @@ const modelLabel = requireElement('model-label')
 const debugQuery = new URLSearchParams(window.location.search)
 const live2dParameterProbeEnabled = debugQuery.get('live2dDebug') === '1'
 const live2dNativeModelUrl = parseLocalLive2dDebugUrl(debugQuery.get('live2dModelUrl'))
+const live2dCoreUrl = resolveLive2dCoreUrl(debugQuery.get('live2dCoreUrl'), window.location.href)
 const live2dDebugEnabled = live2dParameterProbeEnabled || live2dNativeModelUrl !== undefined
 const live2dDebugPanel = live2dDebugEnabled ? createLive2dDebugPanel() : undefined
 
@@ -54,6 +56,7 @@ const live2dQuerySurface = live2dNativeModelUrl === undefined
   ? undefined
   : new Live2dNativeDebugSurface(stage, {
     modelUrl: live2dNativeModelUrl,
+    ...(live2dCoreUrl === undefined ? {} : { coreUrl: live2dCoreUrl }),
     onSnapshot: renderLive2dNativeDebug,
   })
 let live2dCompanionSurface: Live2dNativeDebugSurface | undefined
@@ -183,6 +186,7 @@ async function handleModelAvailable(model: ModelDescriptor): Promise<void> {
   live2dCompanionSurface?.dispose()
   const surface = new Live2dNativeDebugSurface(stage, {
     modelUrl: model.url,
+    ...(live2dCoreUrl === undefined ? {} : { coreUrl: live2dCoreUrl }),
     onSnapshot: (snapshot) => {
       if (generation !== live2dCompanionGeneration) return
       renderLive2dNativeDebug(snapshot)
