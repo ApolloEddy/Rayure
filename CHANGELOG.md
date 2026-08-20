@@ -6,6 +6,7 @@
 
 ### 新增
 
+- 新增 `Motion Semantic Feature v1` 协议合同，固定 ARDY 文本条件的缓存键、规范化 Prompt、编码器版本、4096 维 token 特征、有效 token mask 与生成时间，并覆盖不兼容维度、形状、元数据和非有限值拒绝测试；
 - 选定 Live2D 官方 Cubism Web Samples 的 Hiyori 作为本机调试模型，并放入 Git 忽略的 `scratch/live2d-samples/Hiyori/`；审计结果为 17 个资源、70 个参数、标准 RigProfile 全部匹配；
 - 新增 `Live2dModelManifest` 校验器，拒绝模型资源绝对路径、目录穿越、重复资源和非法动作淡入淡出时间，并提供 MOC3 头校验和标准参数扫描；
 - 新增 `scripts/audit-live2d-model.ps1`，生成仅位于 `scratch/` 的模型审计报告；
@@ -38,6 +39,7 @@
 
 ### 架构影响
 
+- 文本特征合同明确属于运行时数据而非 16 KiB Companion WebSocket 消息；后续可由包外 Text Encoder API 生成并写入本地缓存，正式运行不需要常驻 LLaMA/LLM2Vec；
 - Live2D 主线从参数探针推进到“模型清单校验 → 原生 Cubism 参数驱动”的开发切片；
 - Companion 已完成“模型清单动作组 → 严格动作目录协议”，Wallpaper 已完成“目录 → 原生播放/停止/替换”的第二段；
 - Core 来源先经过独立的安全契约，再进入原生表面；查询参数和 Companion 创建的表面共用同一受控来源；本地 Core 只作为调试输入，不改变正式构建的资源边界；
