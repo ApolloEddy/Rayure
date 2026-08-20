@@ -23,6 +23,7 @@
 - Vite 开发服务器只额外允许读取 `scratch/`，原生调试画布不改变默认 3D 回归页面或发布目录；
 - README、Hiyori 调试文档和 M2 验收单补充模型审计、Core 来源、在线/离线失败边界及 CEF 未关闭项。
 - `scripts/verify.ps1` 增加 `.model3.json`、`.moc3`、`.motion3.json` 和 Cubism Core 文件名的构建产物拦截。
+- Wallpaper Engine 2.8.42 CEF 已完成一轮真实运行复核：本地 `dist` bundle 执行、Companion 重连，以及 Hiyori 的 model3/MOC3/物理/姿态/用户数据、10 个动作和两张纹理请求均有回环资源证据；原生画布视觉、DevTools、暂停恢复和离线 Core 仍明确保持未关闭。
 
 ### 修复
 

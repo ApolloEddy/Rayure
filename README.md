@@ -21,7 +21,7 @@ Rayure Behavior
 
 `CHANGELOG.md` 已记录到 `0.5.2-dev`（此前的 3D 记录为 0.4.8），但根工作区和各 package manifest 仍标记为 0.2.0。本仓库因此应视为开发快照，而不是已经完成版本统一的正式发布版。
 
-当前统一验证中 81 项测试通过，TypeScript 与生产构建均通过；原生 Cubism 画布和 Companion Live2D 模型/动作通道仍仅供本机调试，Core 已具备受控来源和显式失败边界，离线 Core 与 CEF 实机验收仍未闭合。3D 继续作为冻结回归基线。
+当前统一验证中 81 项测试通过，TypeScript 与生产构建均通过；原生 Cubism 画布和 Companion Live2D 模型/动作通道仍仅供本机调试，Core 已具备受控来源和显式失败边界。Wallpaper Engine CEF 已实证本地 bundle、Companion 重连和 Hiyori 令牌资源请求；离线 Core、CEF 视觉/DevTools 与暂停恢复仍未闭合。3D 继续作为冻结回归基线。
 
 ## 已实现
 
@@ -72,7 +72,7 @@ Wallpaper Engine / CEF
 - `packages/protocol`、Companion 与 Wallpaper 已支持 `model.available` 的 `live2d` 格式；Companion 通过令牌化只读 URL 提供整个 `.model3.json` 资源根，Wallpaper 会先校验清单再加载原生模型。
 - Companion 会从 Live2D `.model3.json` 的 `FileReferences.Motions` 自动生成带 `group`/`index` 的动作目录，并以令牌化 `.motion3.json` URL 暴露资源。
 
-当前入口已经把 Canonical Motion fixture 接到真实 Cubism 参数 sink，并完成 Companion → Wallpaper 的 Hiyori 模型、动作目录、默认 Idle、动作替换与停止端到端加载；Core 来源已接入查询参数和 Companion 表面，并在加载前显式失败闭环；下一步是完成离线 Core 文件验收与 Wallpaper Engine CEF 实机验收。
+当前入口已经把 Canonical Motion fixture 接到真实 Cubism 参数 sink，并完成 Companion → Wallpaper 的 Hiyori 模型、动作目录、默认 Idle、动作替换与停止端到端加载；Core 来源已接入查询参数和 Companion 表面，并在加载前显式失败闭环。Wallpaper Engine CEF 的本地 bundle、Companion 重连和模型/动作/纹理资源链路已有运行证据；下一步是补齐可观察 CEF 画布、动作替换、暂停恢复、DevTools 以及离线 Core 文件验收。
 
 现有外部 PMX 角色不能可靠地一键转换为原生 Live2D；官方 Cubism 工作流要求分层 PSD、ArtMesh 和变形器。若只需要本机调试，可运行 [`scripts/prepare-hutao-live2d-debug.ps1`](scripts/prepare-hutao-live2d-debug.ps1)，让外部 PMX 作为视觉参照，同时打开 `?live2dDebug=1` 验证参数链路。调试资源、配置和审计报告均不进入 Git、`dist` 或发布包，详见 [胡桃 L2D 调试边界](docs/live2d-hutao-debug.md)。
 

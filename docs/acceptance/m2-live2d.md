@@ -1,6 +1,6 @@
 # M2 Live2D 原生调试验收
 
-状态：开发调试切片已完成，离线 Core 实际文件与 Wallpaper Engine CEF 实机验收未关闭
+状态：浏览器预检通过；Wallpaper Engine CEF 已证实本地 bundle、Companion 重连和 Live2D 资源链路；离线 Core、CEF 视觉/DevTools 与暂停恢复仍未关闭
 
 ## 范围
 
@@ -22,6 +22,20 @@
 4. 指定 `live2dCoreUrl` 为不存在的回环 `.js`，预期模型状态为 `Live2D model unavailable`，诊断标题包含 `Cubism Core could not be loaded`，原生 canvas 数量为 0；不应出现“已就绪”状态或未处理异常。
 5. 若机器有已授权的包外 Core，可使用 Vite `/@fs/` 形式传入 `live2dCoreUrl` 重做第 2、3 步；没有 Core 时离线失败是预期结果。
 
+## Wallpaper Engine CEF 实机复核（2026-08-20）
+
+使用 Wallpaper Engine 2.8.42（64 位）导入同一 `apps/wallpaper/dist/project.json`，Companion 使用 Git 忽略的包外 Hiyori 配置，Core 继续使用默认的官方托管地址。
+
+已取得的运行证据：
+
+- Wallpaper Engine 启动 `webwallpaper64.exe` CEF 进程，页面历史记录确认加载的是 `file:///D:/CodingProjects/Mixed_Language/Rayure/apps/wallpaper/dist/index.html`；
+- CEF 与 `127.0.0.1:32145` 建立回环连接；Companion 停止后连接进入 `SynSent`，重新启动同一配置后恢复 `Established`；
+- CEF 缓存记录了新的会话令牌，并对 `Hiyori.model3.json`、`Hiyori.moc3`、物理、姿态、用户数据、10 个 `.motion3.json` 和两张纹理收到 `HTTP/1.1 200 OK`；
+- CEF 的 Code Cache 记录了固定官方 `https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js` 来源；本机没有包外离线 Core 文件，因此没有把在线 Core 误报为离线验收；
+- `bin/weblog.txt` 仍记录冻结 3D 场景的缺失 `/assets/scenes/japanese_room.png` 请求。它不改变本次 Live2D 令牌资源链路，但说明 3D 背景不能作为本轮视觉通过证据。
+
+以上证据证明 CEF 已执行本地 bundle 并重新建立 Live2D 资源会话；它们不等价于“原生画布已视觉确认”。
+
 ## CEF 未关闭项
 
 普通 Chrome 的通过只能证明资源 URL、脚本加载和 DOM/Canvas 链路可用，不能替代 Wallpaper Engine CEF。以下项目必须在真实 Wallpaper Engine 导入同一 `dist/` 后复核：
@@ -31,4 +45,4 @@
 - 页面重载、Companion 重启、窗口暂停/恢复和动作替换后是否仍保持 generation 隔离与资源释放；
 - CEF DevTools 无未处理异常，实际画面无黑屏、纹理丢失或比例错误。
 
-在这些项目获得真实 CEF 证据前，M2 只能标记为“浏览器预检通过、CEF 待验收”，不能作为正式发布完成条件。
+当前已关闭“本地 bundle 执行、Companion 重连、模型与资源请求”证据；原生画布视觉、页面重载/暂停恢复、动作替换和 CEF DevTools 仍需在可观察的 CEF 调试窗口中逐项确认。在这些项目完成前，M2 不能作为正式发布完成条件。
