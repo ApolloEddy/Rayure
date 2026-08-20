@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" href="data:," />
+    <title>Rayure</title>
+  </head>
+  <body>
+    <main id="app">
+      <div id="stage"></div>
+      <section class="brand" aria-label="Rayure status">
+        <p class="brand__eyebrow">Desktop embodiment runtime</p>
+        <h1 class="brand__title">Rayure</h1>
+        <p class="brand__subtitle">A local-first canvas for characters that can see, listen and respond.</p>
+      </section>
+      <aside id="connection" class="connection" aria-live="polite">
+        <span id="status-dot" class="connection__dot" data-state="connecting"></span>
+        <span id="connection-label" class="connection__label">Connecting to Companion</span>
+        <span id="endpoint-label" class="connection__endpoint">127.0.0.1:32145</span>
+        <span id="model-label" class="connection__model" data-state="placeholder">Waiting for a local model</span>
+      </aside>
+      <aside id="debug-toolbar" class="debug-toolbar" aria-label="调试工具栏">
+        <button id="debug-toggle" class="debug-toolbar__toggle" type="button" title="展开/收起动作与表情调试栏">🕹️ 动作调试</button>
+        <div id="debug-panel" class="debug-toolbar__panel" hidden>
+          <div class="debug-toolbar__group">
+            <span class="debug-toolbar__label">复合动作 (Emotes)</span>
+            <div class="debug-toolbar__buttons">
+              <button type="button" data-emote="wave">👋 抬手打招呼</button>
+              <button type="button" data-emote="stretch">🙆 晨间伸懒腰</button>
+              <button type="button" data-emote="cross_arms">😤 自信抱胸</button>
+              <button type="button" data-emote="laugh">😆 开怀大笑</button>
+              <button type="button" data-emote="pout">💢 傲娇轻哼</button>
+              <button type="button" data-emote="kiss">💋 浪漫飞吻</button>
+              <button type="button" data-emote="surprise">😲 惊讶探看</button>
+              <button type="button" data-emote="shy">😳 害羞挠头</button>
+              <button type="button" data-emote="clap">💡 击掌领悟</button>
+              <button type="button" data-emote="turn_head">👀 侧身回眸</button>
+              <button type="button" data-emote="idle">🚶 自然待机</button>
+            </div>
+          </div>
+          <div class="debug-toolbar__group">
+            <span class="debug-toolbar__label">面部微表情</span>
+            <div class="debug-toolbar__buttons">
+              <button type="button" data-expr="smile">😊 微笑</button>
+              <button type="button" data-expr="talk_a">🗣️ 张嘴</button>
+              <button type="button" data-expr="surprise">😲 惊讶</button>
+              <button type="button" data-expr="angry">😠 生气</button>
+              <button type="button" data-expr="reset">🔄 复原</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

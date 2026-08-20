@@ -1,0 +1,668 @@
+export const PROTOCOL_VERSION = 1 as const
+export const MAX_WIRE_MESSAGE_BYTES = 16 * 1024
+
+export const companionCapabilities = [
+  'lifecycle.status',
+  'model.catalog',
+  'motion.catalog',
+  'expression.control',
+] as const
+export type CompanionCapability = typeof companionCapabilities[number]
+
+export interface ClientHelloMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'client.hello'
+  id: string
+  payload: {
+    client: 'wallpaper'
+    build: string
+  }
+}
+
+export interface ServerWelcomeMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'server.welcome'
+  id: string
+  replyTo: string
+  payload: {
+    connectionId: string
+    serverTimeMs: number
+    capabilities: readonly CompanionCapability[]
+  }
+}
+
+export type ServerErrorCode =
+  | 'invalid_message'
+  | 'hello_timeout'
+  | 'duplicate_hello'
+  | 'internal_error'
+
+export interface ServerErrorMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'server.error'
+  id: string
+  replyTo?: string
+  payload: {
+    code: ServerErrorCode
+    message: string
+  }
+}
+
+export interface ModelDescriptor {
+  id: string
+  displayName: string
+  format: 'pmx'
+  url: string
+}
+
+export interface ServerModelAvailableMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'model.available'
+  id: string
+  payload: {
+    model: ModelDescriptor
+  }
+}
+
+export interface MotionDescriptor {
+  id: string
+  displayName: string
+  format: 'vmd'
+  url: string
+  loop?: boolean
+}
+
+export interface ServerMotionPlayMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'motion.play'
+  id: string
+  payload: {
+    motion: MotionDescriptor
+  }
+}
+
+export interface ServerMotionStopMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'motion.stop'
+  id: string
+  payload?: {
+    motionId?: string
+  }
+}
+
+export interface ServerExpressionSetMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'expression.set'
+  id: string
+  payload: {
+    name: string
+    weight: number
+    durationMs?: number
+  }
+}
+
+export interface ServerExpressionResetMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'expression.reset'
+  id: string
+  payload?: {
+    durationMs?: number
+  }
+}
+
+export interface ServerMotionCatalogMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'motion.catalog'
+  id: string
+  payload: {
+    motions: readonly MotionDescriptor[]
+  }
+}
+
+export interface ServerEmotePlayMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'emote.play'
+  id: string
+  payload: {
+    emoteId: string
+    motionId?: string
+    expressionName?: string
+    expressionWeight?: number
+    durationMs?: number
+  }
+}
+
+export type ClientMessage = ClientHelloMessage
+export type ServerMessage =
+  | ServerWelcomeMessage
+  | ServerErrorMessage
+  | ServerModelAvailableMessage
+  | ServerMotionCatalogMessage
+  | ServerMotionPlayMessage
+  | ServerMotionStopMessage
+  | ServerExpressionSetMessage
+  | ServerExpressionResetMessage
+  | ServerEmotePlayMessage
+
+export class ProtocolValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ProtocolValidationError'
+  }
+}
+
+export function createClientHello(input: { id: string, build: string }): ClientHelloMessage {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'client.hello',
+    id: requireIdentifier(input.id, 'id'),
+    payload: {
+      client: 'wallpaper',
+      build: requireDisplayString(input.build, 'build', 64),
+    },
+  }
+}
+
+export function createServerWelcome(input: {
+  id: string
+  replyTo: string
+  connectionId: string
+  serverTimeMs: number
+  capabilities?: readonly CompanionCapability[]
+}): ServerWelcomeMessage {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'server.welcome',
+    id: requireIdentifier(input.id, 'id'),
+    replyTo: requireIdentifier(input.replyTo, 'replyTo'),
+    payload: {
+      connectionId: requireIdentifier(input.connectionId, 'connectionId'),
+      serverTimeMs: requireTimestamp(input.serverTimeMs),
+      capabilities: requireCapabilities(input.capabilities ?? companionCapabilities),
+    },
+  }
+}
+
+export function createServerError(input: {
+  id: string
+  replyTo?: string
+  code: ServerErrorCode
+  message: string
+}): ServerErrorMessage {
+  const result: ServerErrorMessage = {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'server.error',
+    id: requireIdentifier(input.id, 'id'),
+    payload: {
+      code: requireErrorCode(input.code),
+      message: requireDisplayString(input.message, 'message', 160),
+    },
+  }
+  if (input.replyTo !== undefined) result.replyTo = requireIdentifier(input.replyTo, 'replyTo')
+  return result
+}
+
+export function createServerModelAvailable(input: {
+  id: string
+  model: ModelDescriptor
+}): ServerModelAvailableMessage {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'model.available',
+    id: requireIdentifier(input.id, 'id'),
+    payload: {
+      model: requireModelDescriptor(input.model),
+    },
+  }
+}
+
+export function createServerMotionPlay(input: {
+  id: string
+  motion: MotionDescriptor
+}): ServerMotionPlayMessage {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'motion.play',
+    id: requireIdentifier(input.id, 'id'),
+    payload: {
+      motion: requireMotionDescriptor(input.motion),
+    },
+  }
+}
+
+export function createServerMotionStop(input: {
+  id: string
+  motionId?: string
+}): ServerMotionStopMessage {
+  const result: ServerMotionStopMessage = {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'motion.stop',
+    id: requireIdentifier(input.id, 'id'),
+  }
+  if (input.motionId !== undefined) {
+    result.payload = {
+      motionId: requireIdentifier(input.motionId, 'motionId'),
+    }
+  }
+  return result
+}
+
+export function createServerExpressionSet(input: {
+  id: string
+  name: string
+  weight: number
+  durationMs?: number
+}): ServerExpressionSetMessage {
+  const payload: ServerExpressionSetMessage['payload'] = {
+    name: requireDisplayString(input.name, 'expression name', 64),
+    weight: requireWeight(input.weight),
+  }
+  if (input.durationMs !== undefined) {
+    payload.durationMs = requireDurationMs(input.durationMs)
+  }
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'expression.set',
+    id: requireIdentifier(input.id, 'id'),
+    payload,
+  }
+}
+
+export function createServerExpressionReset(input: {
+  id: string
+  durationMs?: number
+}): ServerExpressionResetMessage {
+  const result: ServerExpressionResetMessage = {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'expression.reset',
+    id: requireIdentifier(input.id, 'id'),
+  }
+  if (input.durationMs !== undefined) {
+    result.payload = {
+      durationMs: requireDurationMs(input.durationMs),
+    }
+  }
+  return result
+}
+
+export function createServerMotionCatalog(input: {
+  id: string
+  motions: readonly MotionDescriptor[]
+}): ServerMotionCatalogMessage {
+  if (!Array.isArray(input.motions)) {
+    throw new ProtocolValidationError('motions must be an array')
+  }
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'motion.catalog',
+    id: requireIdentifier(input.id, 'id'),
+    payload: {
+      motions: input.motions.map(requireMotionDescriptor),
+    },
+  }
+}
+
+export function createServerEmotePlay(input: {
+  id: string
+  emoteId: string
+  motionId?: string
+  expressionName?: string
+  expressionWeight?: number
+  durationMs?: number
+}): ServerEmotePlayMessage {
+  const payload: ServerEmotePlayMessage['payload'] = {
+    emoteId: requireIdentifier(input.emoteId, 'emoteId'),
+  }
+  if (input.motionId !== undefined) {
+    payload.motionId = requireIdentifier(input.motionId, 'motionId')
+  }
+  if (input.expressionName !== undefined) {
+    payload.expressionName = requireDisplayString(input.expressionName, 'expressionName', 64)
+  }
+  if (input.expressionWeight !== undefined) {
+    payload.expressionWeight = requireWeight(input.expressionWeight)
+  }
+  if (input.durationMs !== undefined) {
+    payload.durationMs = requireDurationMs(input.durationMs)
+  }
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'emote.play',
+    id: requireIdentifier(input.id, 'id'),
+    payload,
+  }
+}
+
+export function parseClientMessage(raw: string): ClientMessage {
+  const value = parseWireObject(raw)
+  requireExactKeys(value, ['protocolVersion', 'type', 'id', 'payload'], 'client message')
+  requireProtocolVersion(value.protocolVersion)
+  if (value.type !== 'client.hello') throw new ProtocolValidationError('Unsupported client message type')
+
+  const payload = requireRecord(value.payload, 'client hello payload')
+  requireExactKeys(payload, ['client', 'build'], 'client hello payload')
+  if (payload.client !== 'wallpaper') throw new ProtocolValidationError('client must be wallpaper')
+
+  return createClientHello({
+    id: requireIdentifier(value.id, 'id'),
+    build: requireDisplayString(payload.build, 'build', 64),
+  })
+}
+
+export function parseServerMessage(raw: string): ServerMessage {
+  const value = parseWireObject(raw)
+  requireProtocolVersion(value.protocolVersion)
+
+  if (value.type === 'server.welcome') {
+    requireExactKeys(value, ['protocolVersion', 'type', 'id', 'replyTo', 'payload'], 'server welcome')
+    const payload = requireRecord(value.payload, 'server welcome payload')
+    requireExactKeys(payload, ['connectionId', 'serverTimeMs', 'capabilities'], 'server welcome payload')
+    return createServerWelcome({
+      id: requireIdentifier(value.id, 'id'),
+      replyTo: requireIdentifier(value.replyTo, 'replyTo'),
+      connectionId: requireIdentifier(payload.connectionId, 'connectionId'),
+      serverTimeMs: requireTimestamp(payload.serverTimeMs),
+      capabilities: requireCapabilities(payload.capabilities),
+    })
+  }
+
+  if (value.type === 'server.error') {
+    requireExactKeys(
+      value,
+      value.replyTo === undefined
+        ? ['protocolVersion', 'type', 'id', 'payload']
+        : ['protocolVersion', 'type', 'id', 'replyTo', 'payload'],
+      'server error',
+    )
+    const payload = requireRecord(value.payload, 'server error payload')
+    requireExactKeys(payload, ['code', 'message'], 'server error payload')
+    return createServerError({
+      id: requireIdentifier(value.id, 'id'),
+      ...(value.replyTo === undefined ? {} : { replyTo: requireIdentifier(value.replyTo, 'replyTo') }),
+      code: requireErrorCode(payload.code),
+      message: requireDisplayString(payload.message, 'message', 160),
+    })
+  }
+
+  if (value.type === 'model.available') {
+    requireExactKeys(value, ['protocolVersion', 'type', 'id', 'payload'], 'model available')
+    const payload = requireRecord(value.payload, 'model available payload')
+    requireExactKeys(payload, ['model'], 'model available payload')
+    return createServerModelAvailable({
+      id: requireIdentifier(value.id, 'id'),
+      model: requireModelDescriptor(payload.model),
+    })
+  }
+
+  if (value.type === 'motion.play') {
+    requireExactKeys(value, ['protocolVersion', 'type', 'id', 'payload'], 'motion play')
+    const payload = requireRecord(value.payload, 'motion play payload')
+    requireExactKeys(payload, ['motion'], 'motion play payload')
+    return createServerMotionPlay({
+      id: requireIdentifier(value.id, 'id'),
+      motion: requireMotionDescriptor(payload.motion),
+    })
+  }
+
+  if (value.type === 'motion.stop') {
+    if (value.payload !== undefined) {
+      requireExactKeys(value, ['protocolVersion', 'type', 'id', 'payload'], 'motion stop')
+      const payload = requireRecord(value.payload, 'motion stop payload')
+      if (payload.motionId !== undefined) {
+        requireExactKeys(payload, ['motionId'], 'motion stop payload')
+        return createServerMotionStop({
+          id: requireIdentifier(value.id, 'id'),
+          motionId: requireIdentifier(payload.motionId, 'motionId'),
+        })
+      }
+      requireExactKeys(payload, [], 'motion stop payload')
+    }
+    else {
+      requireExactKeys(value, ['protocolVersion', 'type', 'id'], 'motion stop')
+    }
+    return createServerMotionStop({
+      id: requireIdentifier(value.id, 'id'),
+    })
+  }
+
+  if (value.type === 'expression.set') {
+    requireExactKeys(value, ['protocolVersion', 'type', 'id', 'payload'], 'expression set')
+    const payload = requireRecord(value.payload, 'expression set payload')
+    const expectedKeys = payload.durationMs !== undefined ? ['name', 'weight', 'durationMs'] : ['name', 'weight']
+    requireExactKeys(payload, expectedKeys, 'expression set payload')
+    return createServerExpressionSet({
+      id: requireIdentifier(value.id, 'id'),
+      name: requireDisplayString(payload.name, 'expression name', 64),
+      weight: requireWeight(payload.weight),
+      ...(payload.durationMs !== undefined ? { durationMs: requireDurationMs(payload.durationMs) } : {}),
+    })
+  }
+
+  if (value.type === 'expression.reset') {
+    if (value.payload !== undefined) {
+      requireExactKeys(value, ['protocolVersion', 'type', 'id', 'payload'], 'expression reset')
+      const payload = requireRecord(value.payload, 'expression reset payload')
+      if (payload.durationMs !== undefined) {
+        requireExactKeys(payload, ['durationMs'], 'expression reset payload')
+        return createServerExpressionReset({
+          id: requireIdentifier(value.id, 'id'),
+          durationMs: requireDurationMs(payload.durationMs),
+        })
+      }
+      requireExactKeys(payload, [], 'expression reset payload')
+    }
+    else {
+      requireExactKeys(value, ['protocolVersion', 'type', 'id'], 'expression reset')
+    }
+    return createServerExpressionReset({
+      id: requireIdentifier(value.id, 'id'),
+    })
+  }
+
+  if (value.type === 'motion.catalog') {
+    requireExactKeys(value, ['protocolVersion', 'type', 'id', 'payload'], 'motion catalog')
+    const payload = requireRecord(value.payload, 'motion catalog payload')
+    requireExactKeys(payload, ['motions'], 'motion catalog payload')
+    if (!Array.isArray(payload.motions)) {
+      throw new ProtocolValidationError('motions must be an array')
+    }
+    return createServerMotionCatalog({
+      id: requireIdentifier(value.id, 'id'),
+      motions: payload.motions.map(requireMotionDescriptor),
+    })
+  }
+
+  if (value.type === 'emote.play') {
+    requireExactKeys(value, ['protocolVersion', 'type', 'id', 'payload'], 'emote play')
+    const payload = requireRecord(value.payload, 'emote play payload')
+    const expectedKeys = ['emoteId']
+    if (payload.motionId !== undefined) expectedKeys.push('motionId')
+    if (payload.expressionName !== undefined) expectedKeys.push('expressionName')
+    if (payload.expressionWeight !== undefined) expectedKeys.push('expressionWeight')
+    if (payload.durationMs !== undefined) expectedKeys.push('durationMs')
+    requireExactKeys(payload, expectedKeys, 'emote play payload')
+
+    return createServerEmotePlay({
+      id: requireIdentifier(value.id, 'id'),
+      emoteId: requireIdentifier(payload.emoteId, 'emoteId'),
+      ...(payload.motionId !== undefined ? { motionId: requireIdentifier(payload.motionId, 'motionId') } : {}),
+      ...(payload.expressionName !== undefined ? { expressionName: requireDisplayString(payload.expressionName, 'expressionName', 64) } : {}),
+      ...(payload.expressionWeight !== undefined ? { expressionWeight: requireWeight(payload.expressionWeight) } : {}),
+      ...(payload.durationMs !== undefined ? { durationMs: requireDurationMs(payload.durationMs) } : {}),
+    })
+  }
+
+  throw new ProtocolValidationError('Unsupported server message type')
+}
+
+export function serializeWireMessage(message: ClientMessage | ServerMessage): string {
+  const raw = JSON.stringify(message)
+  requireWireSize(raw)
+  return raw
+}
+
+function parseWireObject(raw: string): Record<string, unknown> {
+  if (typeof raw !== 'string') throw new ProtocolValidationError('Wire message must be text')
+  requireWireSize(raw)
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  }
+  catch {
+    throw new ProtocolValidationError('Wire message must be valid JSON')
+  }
+  return requireRecord(parsed, 'wire message')
+}
+
+function requireWireSize(raw: string): void {
+  if (new TextEncoder().encode(raw).byteLength > MAX_WIRE_MESSAGE_BYTES) {
+    throw new ProtocolValidationError('Message exceeds maximum wire size')
+  }
+}
+
+function requireRecord(value: unknown, name: string): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ProtocolValidationError(`${name} must be an object`)
+  }
+  return value as Record<string, unknown>
+}
+
+function requireExactKeys(value: Record<string, unknown>, expected: readonly string[], name: string): void {
+  const actual = Object.keys(value).sort()
+  const required = [...expected].sort()
+  if (actual.length !== required.length || actual.some((key, index) => key !== required[index])) {
+    throw new ProtocolValidationError(`${name} contains missing or unknown fields`)
+  }
+}
+
+function requireProtocolVersion(value: unknown): asserts value is typeof PROTOCOL_VERSION {
+  if (value !== PROTOCOL_VERSION) throw new ProtocolValidationError('Unsupported protocol version')
+}
+
+function requireIdentifier(value: unknown, name: string): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9._:-]{1,64}$/u.test(value)) {
+    throw new ProtocolValidationError(`${name} must be a 1-64 character wire identifier`)
+  }
+  return value
+}
+
+function requireDisplayString(value: unknown, name: string, maxLength: number): string {
+  if (
+    typeof value !== 'string'
+    || value.length < 1
+    || value.length > maxLength
+    || value.trim() !== value
+    || /[\u0000-\u001F\u007F]/u.test(value)
+  ) {
+    throw new ProtocolValidationError(`${name} must be a trimmed printable string up to ${maxLength} characters`)
+  }
+  return value
+}
+
+function requireTimestamp(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new ProtocolValidationError('serverTimeMs must be a non-negative safe integer')
+  }
+  return value
+}
+
+function requireCapabilities(value: unknown): readonly CompanionCapability[] {
+  if (!Array.isArray(value)) throw new ProtocolValidationError('capabilities must be an array')
+  const allowed = new Set<string>(companionCapabilities)
+  const result: CompanionCapability[] = []
+  for (const capability of value) {
+    if (typeof capability !== 'string' || !allowed.has(capability)) {
+      throw new ProtocolValidationError('capabilities contains an unsupported capability')
+    }
+    if (result.includes(capability as CompanionCapability)) {
+      throw new ProtocolValidationError('capabilities must not contain duplicates')
+    }
+    result.push(capability as CompanionCapability)
+  }
+  return result
+}
+
+function requireErrorCode(value: unknown): ServerErrorCode {
+  if (
+    value !== 'invalid_message'
+    && value !== 'hello_timeout'
+    && value !== 'duplicate_hello'
+    && value !== 'internal_error'
+  ) {
+    throw new ProtocolValidationError('Unsupported server error code')
+  }
+  return value
+}
+
+function requireModelDescriptor(value: unknown): ModelDescriptor {
+  const model = requireRecord(value, 'model descriptor')
+  requireExactKeys(model, ['id', 'displayName', 'format', 'url'], 'model descriptor')
+  if (model.format !== 'pmx') throw new ProtocolValidationError('model format must be pmx')
+  return {
+    id: requireIdentifier(model.id, 'model id'),
+    displayName: requireDisplayString(model.displayName, 'model displayName', 96),
+    format: 'pmx',
+    url: requireLoopbackAssetUrl(model.url),
+  }
+}
+
+function requireLoopbackAssetUrl(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 4096 || /[\u0000-\u001F\u007F]/u.test(value)) {
+    throw new ProtocolValidationError('model URL must be a printable string up to 4096 characters')
+  }
+
+  let url: URL
+  try {
+    url = new URL(value)
+  }
+  catch {
+    throw new ProtocolValidationError('model URL must be valid')
+  }
+  if (
+    url.protocol !== 'http:'
+    || url.hostname !== '127.0.0.1'
+    || url.port.length === 0
+    || url.username.length > 0
+    || url.password.length > 0
+    || url.search.length > 0
+    || url.hash.length > 0
+    || !/^\/assets\/[A-Za-z0-9_-]{16,128}\/.+/u.test(url.pathname)
+  ) {
+    throw new ProtocolValidationError('model URL must use the tokenized loopback asset endpoint')
+  }
+  return url.href
+}
+
+function requireMotionDescriptor(value: unknown): MotionDescriptor {
+  const motion = requireRecord(value, 'motion descriptor')
+  if (motion.loop !== undefined) {
+    requireExactKeys(motion, ['id', 'displayName', 'format', 'url', 'loop'], 'motion descriptor')
+    if (typeof motion.loop !== 'boolean') throw new ProtocolValidationError('motion loop must be boolean')
+  }
+  else {
+    requireExactKeys(motion, ['id', 'displayName', 'format', 'url'], 'motion descriptor')
+  }
+  if (motion.format !== 'vmd') throw new ProtocolValidationError('motion format must be vmd')
+  return {
+    id: requireIdentifier(motion.id, 'motion id'),
+    displayName: requireDisplayString(motion.displayName, 'motion displayName', 96),
+    format: 'vmd',
+    url: requireLoopbackAssetUrl(motion.url),
+    ...(motion.loop !== undefined ? { loop: motion.loop } : {}),
+  }
+}
+
+function requireWeight(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+    throw new ProtocolValidationError('weight must be a finite number between 0 and 1')
+  }
+  return value
+}
+
+function requireDurationMs(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 60_000) {
+    throw new ProtocolValidationError('durationMs must be a non-negative safe integer up to 60000')
+  }
+  return value
+}
+

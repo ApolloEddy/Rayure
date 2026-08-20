@@ -1,0 +1,8 @@
+{
+  "model": {
+    "id": "local-model",
+    "displayName": "Local development model",
+    "format": "pmx",
+    "path": "D:\\Models\\Character\\character.pmx"
+  }
+}

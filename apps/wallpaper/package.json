@@ -1,0 +1,21 @@
+{
+  "name": "@rayure/wallpaper",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite --host 127.0.0.1",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@rayure/protocol": "workspace:*",
+    "@yohawing/three-mmd-loader": "0.8.1",
+    "three": "0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "0.185.4",
+    "vite": "8.2.1"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "description": "A local-first interactive 2D/3D character runtime for Wallpaper Engine.",
+  "file": "index.html",
+  "general": {
+    "properties": {
+      "accentcolor": {
+        "order": 1,
+        "text": "ui_rayure_accent_color",
+        "type": "color",
+        "value": "0.4039215686 0.9098039216 0.9764705882"
+      },
+      "companionport": {
+        "order": 2,
+        "text": "ui_rayure_companion_port",
+        "type": "slider",
+        "value": 32145,
+        "min": 1024,
+        "max": 65535,
+        "editable": true
+      },
+      "modelscale": {
+        "order": 3,
+        "text": "ui_rayure_model_scale",
+        "type": "slider",
+        "value": 100,
+        "min": 25,
+        "max": 200,
+        "editable": true
+      },
+      "showstatus": {
+        "order": 4,
+        "text": "ui_rayure_show_status",
+        "type": "bool",
+        "value": true
+      }
+    },
+    "localization": {
+      "en-us": {
+        "ui_rayure_accent_color": "Accent color",
+        "ui_rayure_companion_port": "Companion port",
+        "ui_rayure_model_scale": "Model scale",
+        "ui_rayure_show_status": "Show connection status"
+      },
+      "zh-chs": {
+        "ui_rayure_accent_color": "强调色",
+        "ui_rayure_companion_port": "Companion 端口",
+        "ui_rayure_model_scale": "模型缩放",
+        "ui_rayure_show_status": "显示连接状态"
+      }
+    }
+  },
+  "title": "Rayure",
+  "type": "web"
+}

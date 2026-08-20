@@ -1,0 +1,47 @@
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+output/playwright/
+.playwright-cli/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+credentials.json
+secrets.yaml
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+env/
+
+*.log
+tmp/
+temp/
+.gemini/
+server/data/vector_store/
+
+# User-owned character, scene, motion, voice and sensor data stay external.
+assets/private/
+user-data/
+models/
+motions/
+recordings/
+
+# Local experiments and purchased scene source files are not distributable.
+scratch/
+apps/wallpaper/public/assets/scenes/
+
+# Machine-local Companion configuration may contain private absolute asset paths.
+rayure.local.json
