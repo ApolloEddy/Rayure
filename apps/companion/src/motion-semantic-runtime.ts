@@ -5,12 +5,15 @@ import {
 } from './motion-semantic-cache.ts'
 import type { RayureMotionSemanticConfig } from './local-config.ts'
 import { TextEncoderApiClient } from './text-encoder-client.ts'
+import { ArdyProcessClient } from './ardy-process-client.ts'
 
 export interface MotionSemanticRuntime {
   readonly cache: MemoryMotionSemanticFeatureCache
   readonly resolver: CachedMotionSemanticFeatureResolver | undefined
   readonly cachePath: string | undefined
+  readonly ardy: ArdyProcessClient | undefined
   persist(): Promise<void>
+  close(): Promise<void>
 }
 
 export interface CreateMotionSemanticRuntimeOptions {
@@ -43,8 +46,20 @@ export async function createMotionSemanticRuntime(
       }),
       afterEncode: persist,
     })
+  const ardy = config?.ardy === undefined
+    ? undefined
+    : new ArdyProcessClient({
+      command: config.ardy.command,
+      args: config.ardy.args,
+      requestTimeoutMs: config.ardy.requestTimeoutMs,
+      ...(config.ardy.cwd === undefined ? {} : { cwd: config.ardy.cwd }),
+    })
 
-  return { cache, resolver, cachePath, persist }
+  const close = async (): Promise<void> => {
+    await ardy?.close()
+  }
+
+  return { cache, resolver, cachePath, ardy, persist, close }
 }
 
 async function readInitialFeatures(filePath: string) {

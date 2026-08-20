@@ -2,6 +2,7 @@ import { isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { loadLocalConfig } from './local-config.ts'
+import { createMotionSemanticRuntime } from './motion-semantic-runtime.ts'
 import { createCompanionServer } from './server.ts'
 
 const DEFAULT_PORT = 32145
@@ -21,28 +22,38 @@ async function main(): Promise<void> {
   const explicitConfigPath = readExplicitConfigPath()
   const configPath = explicitConfigPath ?? fileURLToPath(new URL('../../../rayure.local.json', import.meta.url))
   const config = await loadLocalConfig(configPath, { optional: explicitConfigPath === undefined })
+  const motionSemanticRuntime = await createMotionSemanticRuntime(config.motionSemantic)
   const server = createCompanionServer({
     port: readPort(),
     ...(config.model === undefined ? {} : { model: config.model }),
     ...(config.motions === undefined ? {} : { motions: config.motions }),
   })
-  const address = await server.start()
-  process.stdout.write(`${JSON.stringify({
-    event: 'companion.ready',
-    ...address,
-    modelAvailable: config.model !== undefined,
-  })}\n`)
+  try {
+    const address = await server.start()
+    process.stdout.write(`${JSON.stringify({
+      event: 'companion.ready',
+      ...address,
+      modelAvailable: config.model !== undefined,
+      motionSemanticCacheEntries: motionSemanticRuntime.cache.size,
+      motionSemanticEncoderAvailable: motionSemanticRuntime.resolver !== undefined,
+      ardyAvailable: motionSemanticRuntime.ardy !== undefined,
+    })}\n`)
 
-  let stopping = false
-  const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
-    if (stopping) return
-    stopping = true
-    process.stderr.write(`${JSON.stringify({ event: 'companion.stopping', signal })}\n`)
-    await server.stop()
+    let stopping = false
+    const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
+      if (stopping) return
+      stopping = true
+      process.stderr.write(`${JSON.stringify({ event: 'companion.stopping', signal })}\n`)
+      await Promise.all([server.stop(), motionSemanticRuntime.close()])
+    }
+
+    process.once('SIGINT', () => void shutdown('SIGINT'))
+    process.once('SIGTERM', () => void shutdown('SIGTERM'))
   }
-
-  process.once('SIGINT', () => void shutdown('SIGINT'))
-  process.once('SIGTERM', () => void shutdown('SIGTERM'))
+  catch (cause) {
+    await motionSemanticRuntime.close()
+    throw cause
+  }
 }
 
 function readExplicitConfigPath(): string | undefined {

@@ -6,6 +6,13 @@ import {
   validateTextEncoderEndpoint,
   validateTextEncoderTimeout,
 } from './text-encoder-client.ts'
+import {
+  DEFAULT_ARDY_PROCESS_TIMEOUT_MS,
+  validateArdyProcessArgs,
+  validateArdyProcessCommand,
+  validateArdyProcessCwd,
+  validateArdyProcessTimeout,
+} from './ardy-process-client.ts'
 import type { CompanionModelSource, CompanionMotionSource } from './model-source.ts'
 
 const MAX_LOCAL_CONFIG_BYTES = 64 * 1024
@@ -21,6 +28,12 @@ export interface RayureMotionSemanticConfig {
   textEncoder?: {
     endpoint: string
     timeoutMs: number
+  } | undefined
+  ardy?: {
+    command: string
+    args: readonly string[]
+    cwd?: string | undefined
+    requestTimeoutMs: number
   } | undefined
 }
 
@@ -137,6 +150,7 @@ function resolveMotionSemanticConfig(value: unknown): RayureMotionSemanticConfig
   const allowedKeys = []
   if (root.cachePath !== undefined) allowedKeys.push('cachePath')
   if (root.textEncoder !== undefined) allowedKeys.push('textEncoder')
+  if (root.ardy !== undefined) allowedKeys.push('ardy')
   requireExactKeys(root, allowedKeys, 'motionSemantic config')
   if (allowedKeys.length === 0) throw new Error('motionSemantic config must define cachePath or textEncoder')
 
@@ -155,10 +169,30 @@ function resolveMotionSemanticConfig(value: unknown): RayureMotionSemanticConfig
     }
   }
 
+  let ardy: RayureMotionSemanticConfig['ardy']
+  if (root.ardy !== undefined) ardy = resolveArdyConfig(root.ardy)
+
   return {
     ...(cachePath === undefined ? {} : { cachePath }),
     ...(textEncoder === undefined ? {} : { textEncoder }),
+    ...(ardy === undefined ? {} : { ardy }),
   }
+}
+
+function resolveArdyConfig(value: unknown): NonNullable<RayureMotionSemanticConfig['ardy']> {
+  const root = requireRecord(value, 'motionSemantic ardy')
+  const allowedKeys = ['command', 'args']
+  if (root.cwd !== undefined) allowedKeys.push('cwd')
+  if (root.requestTimeoutMs !== undefined) allowedKeys.push('requestTimeoutMs')
+  requireExactKeys(root, allowedKeys, 'motionSemantic ardy')
+  if (!Array.isArray(root.args)) throw new Error('motionSemantic ardy args must be an array')
+  const result: NonNullable<RayureMotionSemanticConfig['ardy']> = {
+    command: validateArdyProcessCommand(root.command),
+    args: validateArdyProcessArgs(root.args),
+    requestTimeoutMs: validateArdyProcessTimeout(root.requestTimeoutMs ?? DEFAULT_ARDY_PROCESS_TIMEOUT_MS),
+  }
+  if (root.cwd !== undefined) result.cwd = validateArdyProcessCwd(root.cwd)
+  return result
 }
 
 function requireRecord(value: unknown, name: string): Record<string, unknown> {

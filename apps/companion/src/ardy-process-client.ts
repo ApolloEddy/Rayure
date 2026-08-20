@@ -53,10 +53,10 @@ export class ArdyProcessClient {
   #closed = false
 
   constructor(options: ArdyProcessClientOptions) {
-    const command = requireCommand(options.command)
-    const args = requireArgs(options.args ?? [])
-    const cwd = options.cwd === undefined ? undefined : requireCwd(options.cwd)
-    this.#requestTimeoutMs = requireTimeout(options.requestTimeoutMs ?? DEFAULT_ARDY_PROCESS_TIMEOUT_MS)
+    const command = validateArdyProcessCommand(options.command)
+    const args = validateArdyProcessArgs(options.args ?? [])
+    const cwd = options.cwd === undefined ? undefined : validateArdyProcessCwd(options.cwd)
+    this.#requestTimeoutMs = validateArdyProcessTimeout(options.requestTimeoutMs ?? DEFAULT_ARDY_PROCESS_TIMEOUT_MS)
     this.#child = spawn(command, args, {
       cwd,
       shell: false,
@@ -133,10 +133,13 @@ export class ArdyProcessClient {
     catch {
       // The process may have already closed its stdin.
     }
+    const closePromise = this.#child.exitCode !== null
+      ? Promise.resolve()
+      : once(this.#child, 'close').then(() => undefined)
     if (this.#child.exitCode === null) this.#child.kill()
     if (this.#child.exitCode !== null) return
     await Promise.race([
-      once(this.#child, 'close').then(() => undefined),
+      closePromise,
       new Promise<void>(resolve => setTimeout(resolve, 2_000)),
     ])
   }
@@ -208,7 +211,7 @@ export class ArdyProcessClient {
   }
 }
 
-function requireCommand(value: unknown): string {
+export function validateArdyProcessCommand(value: unknown): string {
   if (
     typeof value !== 'string'
     || value.length < 1
@@ -221,7 +224,7 @@ function requireCommand(value: unknown): string {
   return value
 }
 
-function requireArgs(value: readonly string[]): readonly string[] {
+export function validateArdyProcessArgs(value: readonly string[]): readonly string[] {
   if (!Array.isArray(value) || value.length > 64) throw new Error('ARDY process args must contain at most 64 items')
   for (const [index, arg] of value.entries()) {
     if (
@@ -236,7 +239,7 @@ function requireArgs(value: readonly string[]): readonly string[] {
   return value
 }
 
-function requireCwd(value: unknown): string {
+export function validateArdyProcessCwd(value: unknown): string {
   if (
     typeof value !== 'string'
     || value.length < 1
@@ -249,7 +252,7 @@ function requireCwd(value: unknown): string {
   return value
 }
 
-function requireTimeout(value: unknown): number {
+export function validateArdyProcessTimeout(value: unknown): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 250 || value > 120_000) {
     throw new Error('ARDY process requestTimeoutMs must be an integer from 250 through 120000')
   }
