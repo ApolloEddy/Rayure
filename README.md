@@ -63,8 +63,11 @@ Wallpaper Engine / CEF
 - `apps/wallpaper/src/live2d/rig-profile.ts`：标准参数 `RigProfile`、身体/头部/手臂投影和范围钳位；
 - `apps/wallpaper/src/live2d/motion-player.ts`：录制动作按时间推进到参数 sink 的回放器；
 - `apps/wallpaper/test/live2d-*.test.ts`：覆盖完整性、异常输入、参数映射、停止和结束状态。
+- `apps/wallpaper/src/live2d/debug-probe.ts`：仅在 `?live2dDebug=1` 下启用的参数链路探针；它不携带 Cubism Core 或角色像素。
 
 这一步是模型无关的运行时基础。下一步才引入授权明确的 Cubism Web SDK 与开发模型，并把参数 sink 接到真实 ArtMesh/Deformer/Parameter 层。
+
+现有外部 PMX 角色不能可靠地一键转换为原生 Live2D；官方 Cubism 工作流要求分层 PSD、ArtMesh 和变形器。若只需要本机调试，可运行 [`scripts/prepare-hutao-live2d-debug.ps1`](scripts/prepare-hutao-live2d-debug.ps1)，让外部 PMX 作为视觉参照，同时打开 `?live2dDebug=1` 验证参数链路。调试资源、配置和审计报告均不进入 Git、`dist` 或发布包，详见 [胡桃 L2D 调试边界](docs/live2d-hutao-debug.md)。
 
 ## 环境
 

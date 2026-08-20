@@ -2,6 +2,22 @@
 
 本项目的所有重要变更都会记录在此文件中。
 
+## [0.5.1-dev] - 2026-08-20
+
+### 新增
+
+- 新增 `Live2dDebugProbe` 与本地 fixture，仅在 `?live2dDebug=1` 下运行真实的 Canonical Motion → RigProfile → Parameter Sink 链路；
+- 新增 `scripts/prepare-hutao-live2d-debug.ps1` 与 [胡桃 L2D 调试边界](docs/live2d-hutao-debug.md)，把外部 PMX 仅作为本机视觉参照，并生成被忽略的审计报告。
+
+### 修复
+
+- 修正壁纸就绪后的默认 `wave` 复合动作调用，使其使用当前的 `emoteId` 字段并恢复 TypeScript 门禁。
+
+### 边界
+
+- 已确认 PMX/FBX/Blend 不能可靠地一键导出原生 `.moc3`/`.model3.json`；当前不生成、不复制、不发布胡桃衍生模型；
+- 调试路径不携带 Cubism Core 或第三方角色像素，外部资源仍由 Companion 只读令牌网关提供。
+
 ## [0.5.0-dev] - 2026-08-20
 
 ### 新增

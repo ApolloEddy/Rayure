@@ -258,3 +258,41 @@ body::before {
   transform: translateY(-1px);
 }
 
+.live2d-debug-panel {
+  position: fixed;
+  top: clamp(20px, 4vw, 56px);
+  right: clamp(20px, 4vw, 64px);
+  z-index: 10;
+  display: grid;
+  gap: 5px;
+  max-width: min(440px, calc(100vw - 40px));
+  padding: 11px 13px;
+  border: 1px solid rgba(255, 216, 169, 0.24);
+  border-radius: 10px;
+  background: rgba(37, 19, 11, 0.78);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.3);
+  color: rgba(255, 238, 220, 0.84);
+  pointer-events: none;
+}
+
+.live2d-debug-panel strong {
+  color: #ffd3a8;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.live2d-debug-panel span {
+  color: rgba(255, 225, 202, 0.55);
+  font-size: 9px;
+  letter-spacing: 0.03em;
+}
+
+.live2d-debug-panel code {
+  overflow: hidden;
+  color: rgba(255, 244, 231, 0.78);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

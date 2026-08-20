@@ -23,9 +23,16 @@ import { MmdModelHost } from './mmd-model-host.ts'
 import type { MmdModelLoadOutcome, MmdModelStatus } from './mmd-model-host.ts'
 import { EnvironmentHost } from './environment-host.ts'
 import type { ModelDescriptor, MotionDescriptor } from '@rayure/protocol'
+import {
+  createLive2dDebugMotion,
+  Live2dDebugProbe,
+} from './live2d/debug-probe.ts'
+import type { Live2dDebugSnapshot } from './live2d/debug-probe.ts'
 
 export interface RayureSceneOptions {
   onModelStatus?: (status: MmdModelStatus) => void
+  live2dDebug?: boolean | undefined
+  onLive2dDebug?: ((snapshot: Live2dDebugSnapshot) => void) | undefined
 }
 
 export class RayureScene {
@@ -38,6 +45,8 @@ export class RayureScene {
   readonly #modelMount = new Group()
   readonly #modelHost: MmdModelHost
   readonly #environment: EnvironmentHost
+  readonly #live2dDebugProbe: Live2dDebugProbe | undefined
+  readonly #live2dDebugMotion = createLive2dDebugMotion()
   readonly #coreMaterial: MeshPhysicalMaterial
   readonly #ringMaterials: MeshPhysicalMaterial[]
   readonly #particlesMaterial: PointsMaterial
@@ -101,6 +110,11 @@ export class RayureScene {
         options.onModelStatus?.(status)
       },
     })
+
+    this.#live2dDebugProbe = options.live2dDebug === true
+      ? new Live2dDebugProbe({ onSnapshot: options.onLive2dDebug })
+      : undefined
+    this.#live2dDebugProbe?.bind(this.#live2dDebugMotion)
 
     this.#particlesMaterial = new PointsMaterial({
       color: 0xffe6cc,
@@ -183,6 +197,10 @@ export class RayureScene {
     return this.#modelHost
   }
 
+  get live2dDebugProbe(): Live2dDebugProbe | undefined {
+    return this.#live2dDebugProbe
+  }
+
   dispose(): void {
     if (this.#disposed) return
     this.#disposed = true
@@ -190,6 +208,7 @@ export class RayureScene {
     this.#animationFrame = undefined
     window.removeEventListener('resize', this.#resize)
     window.removeEventListener('pointermove', this.#onPointerMove)
+    this.#live2dDebugProbe?.dispose()
     this.#modelHost.dispose()
     this.#environment.dispose()
     this.#scene.traverse((node) => {
@@ -211,6 +230,7 @@ export class RayureScene {
     this.#lastRenderedAt = timestamp
 
     this.#modelHost.advance(deltaSeconds, this.#pointerX, this.#pointerY)
+    this.#live2dDebugProbe?.advance(deltaSeconds, this.#live2dDebugMotion)
 
     this.#avatar.rotation.x += (this.#pointerY * 0.03 - this.#avatar.rotation.x) * Math.min(1, deltaSeconds * 1.5)
     this.#avatar.rotation.y += (this.#pointerX * 0.04 - this.#avatar.rotation.y) * Math.min(1, deltaSeconds * 1.5)

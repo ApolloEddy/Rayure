@@ -13,6 +13,7 @@ import {
 } from './config.ts'
 import { RayureScene } from './scene.ts'
 import type { MmdModelStatus } from './mmd-model-host.ts'
+import type { Live2dDebugSnapshot } from './live2d/debug-probe.ts'
 import type { WallpaperPropertyListener } from './wallpaper-api.ts'
 
 const BUILD = '0.2.0-m1'
@@ -22,6 +23,8 @@ const endpointLabel = requireElement('endpoint-label')
 const statusDot = requireElement('status-dot')
 const connectionPanel = requireElement('connection')
 const modelLabel = requireElement('model-label')
+const live2dDebugEnabled = new URLSearchParams(window.location.search).get('live2dDebug') === '1'
+const live2dDebugPanel = live2dDebugEnabled ? createLive2dDebugPanel() : undefined
 
 declare global {
   interface Window {
@@ -32,7 +35,11 @@ declare global {
 const queryPort = parsePort(new URLSearchParams(window.location.search).get('port'))
 let companionPort = queryPort ?? DEFAULT_WALLPAPER_SETTINGS.companionPort
 let accent = { ...DEFAULT_WALLPAPER_SETTINGS.accent }
-const scene = new RayureScene(stage, accent, { onModelStatus: renderModelStatus })
+const scene = new RayureScene(stage, accent, {
+  onModelStatus: renderModelStatus,
+  live2dDebug: live2dDebugEnabled,
+  onLive2dDebug: renderLive2dDebug,
+})
 window.__rayure_scene__ = scene
 
 const companion = new CompanionClient({
@@ -141,7 +148,7 @@ function renderModelStatus(status: MmdModelStatus): void {
 
   if (status.phase === 'ready') {
     setTimeout(() => {
-      void scene.playEmote({ preset: 'wave' })
+      void scene.playEmote({ emoteId: 'wave' })
     }, 600)
   }
 }
@@ -150,6 +157,35 @@ function applyAccent(color: typeof accent): void {
   document.documentElement.style.setProperty('--accent', toCssColor(color))
   document.documentElement.style.setProperty('--accent-soft', toCssColor(color, 0.16))
   document.documentElement.style.setProperty('--accent-faint', toCssColor(color, 0.055))
+}
+
+function createLive2dDebugPanel(): {
+  root: HTMLElement
+  values: HTMLElement
+} {
+  const root = document.createElement('aside')
+  root.className = 'live2d-debug-panel'
+  root.setAttribute('aria-live', 'polite')
+
+  const title = document.createElement('strong')
+  title.textContent = 'Live2D debug probe'
+  const note = document.createElement('span')
+  note.textContent = 'parameter path only · native Cubism model not loaded'
+  const values = document.createElement('code')
+  values.textContent = 'waiting for fixture'
+  root.append(title, note, values)
+  document.body.append(root)
+  return { root, values }
+}
+
+function renderLive2dDebug(snapshot: Live2dDebugSnapshot): void {
+  if (!live2dDebugPanel) return
+  const entries = Object.entries(snapshot.parameters)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(0, 6)
+  live2dDebugPanel.values.textContent = entries.length > 0
+    ? entries.map(([id, value]) => `${id}=${value.toFixed(1)}`).join(' · ')
+    : 'waiting for fixture'
 }
 
 function requireElement(id: string): HTMLElement {
