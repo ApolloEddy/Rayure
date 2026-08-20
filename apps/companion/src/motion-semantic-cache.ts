@@ -18,6 +18,10 @@ export class MemoryMotionSemanticFeatureCache implements MotionSemanticFeatureCa
     return this.#entries.size
   }
 
+  snapshot(): readonly MotionSemanticFeature[] {
+    return [...this.#entries.values()]
+  }
+
   get(cacheKey: string): MotionSemanticFeature | undefined {
     return this.#entries.get(requireCacheKey(cacheKey))
   }
@@ -43,16 +47,19 @@ export interface MotionSemanticFeatureResolveInput extends MotionSemanticFeature
 export interface CachedMotionSemanticFeatureResolverOptions {
   cache: MotionSemanticFeatureCache
   encoder: MotionSemanticFeatureEncoder
+  afterEncode?: ((feature: MotionSemanticFeature) => Promise<void> | void) | undefined
 }
 
 /** Resolves a feature from the local cache first, then encodes and caches misses. */
 export class CachedMotionSemanticFeatureResolver {
   readonly #cache: MotionSemanticFeatureCache
   readonly #encoder: MotionSemanticFeatureEncoder
+  readonly #afterEncode: ((feature: MotionSemanticFeature) => Promise<void> | void) | undefined
 
   constructor(options: CachedMotionSemanticFeatureResolverOptions) {
     this.#cache = options.cache
     this.#encoder = options.encoder
+    this.#afterEncode = options.afterEncode
   }
 
   async resolve(input: MotionSemanticFeatureResolveInput): Promise<MotionSemanticFeature> {
@@ -71,6 +78,7 @@ export class CachedMotionSemanticFeatureResolver {
       throw new Error('Text encoder returned a feature with a mismatched cache identity')
     }
     this.#cache.set(encoded)
+    await this.#afterEncode?.(encoded)
     return encoded
   }
 }

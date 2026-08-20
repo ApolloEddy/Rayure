@@ -23,8 +23,8 @@ export class TextEncoderApiClient implements MotionSemanticFeatureEncoder {
   readonly #fetch: typeof fetch
 
   constructor(options: TextEncoderApiClientOptions) {
-    this.#endpoint = requireEndpoint(options.endpoint)
-    this.#timeoutMs = requireTimeout(options.timeoutMs ?? DEFAULT_TEXT_ENCODER_TIMEOUT_MS)
+    this.#endpoint = validateTextEncoderEndpoint(options.endpoint)
+    this.#timeoutMs = validateTextEncoderTimeout(options.timeoutMs ?? DEFAULT_TEXT_ENCODER_TIMEOUT_MS)
     this.#fetch = options.fetchImplementation ?? fetch
   }
 
@@ -63,6 +63,14 @@ export class TextEncoderApiClient implements MotionSemanticFeatureEncoder {
       clearTimeout(timeoutHandle)
     }
   }
+}
+
+export function validateTextEncoderEndpoint(value: unknown): string {
+  return requireEndpoint(value)
+}
+
+export function validateTextEncoderTimeout(value: unknown): number {
+  return requireTimeout(value)
 }
 
 async function readResponseBody(response: Response): Promise<string> {

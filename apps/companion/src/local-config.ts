@@ -1,6 +1,11 @@
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { extname, isAbsolute } from 'node:path'
 
+import {
+  DEFAULT_TEXT_ENCODER_TIMEOUT_MS,
+  validateTextEncoderEndpoint,
+  validateTextEncoderTimeout,
+} from './text-encoder-client.ts'
 import type { CompanionModelSource, CompanionMotionSource } from './model-source.ts'
 
 const MAX_LOCAL_CONFIG_BYTES = 64 * 1024
@@ -8,6 +13,15 @@ const MAX_LOCAL_CONFIG_BYTES = 64 * 1024
 export interface RayureLocalConfig {
   model?: CompanionModelSource | undefined
   motions?: readonly CompanionMotionSource[] | undefined
+  motionSemantic?: RayureMotionSemanticConfig | undefined
+}
+
+export interface RayureMotionSemanticConfig {
+  cachePath?: string | undefined
+  textEncoder?: {
+    endpoint: string
+    timeoutMs: number
+  } | undefined
 }
 
 export interface LoadLocalConfigOptions {
@@ -43,6 +57,7 @@ export async function loadLocalConfig(
   const allowedKeys = []
   if (root.model !== undefined) allowedKeys.push('model')
   if (root.motions !== undefined) allowedKeys.push('motions')
+  if (root.motionSemantic !== undefined) allowedKeys.push('motionSemantic')
   requireExactKeys(root, allowedKeys, 'Rayure local config')
 
   let resolvedModel: CompanionModelSource | undefined
@@ -106,9 +121,43 @@ export async function loadLocalConfig(
     }
   }
 
+  const motionSemantic = root.motionSemantic === undefined
+    ? undefined
+    : resolveMotionSemanticConfig(root.motionSemantic)
+
   return {
     ...(resolvedModel ? { model: resolvedModel } : {}),
     ...(resolvedMotions ? { motions: resolvedMotions } : {}),
+    ...(motionSemantic ? { motionSemantic } : {}),
+  }
+}
+
+function resolveMotionSemanticConfig(value: unknown): RayureMotionSemanticConfig {
+  const root = requireRecord(value, 'motionSemantic config')
+  const allowedKeys = []
+  if (root.cachePath !== undefined) allowedKeys.push('cachePath')
+  if (root.textEncoder !== undefined) allowedKeys.push('textEncoder')
+  requireExactKeys(root, allowedKeys, 'motionSemantic config')
+  if (allowedKeys.length === 0) throw new Error('motionSemantic config must define cachePath or textEncoder')
+
+  const cachePath = root.cachePath === undefined
+    ? undefined
+    : requireAbsoluteFeatureCachePath(root.cachePath)
+  let textEncoder: RayureMotionSemanticConfig['textEncoder']
+  if (root.textEncoder !== undefined) {
+    const encoder = requireRecord(root.textEncoder, 'motionSemantic textEncoder')
+    const encoderKeys = ['endpoint']
+    if (encoder.timeoutMs !== undefined) encoderKeys.push('timeoutMs')
+    requireExactKeys(encoder, encoderKeys, 'motionSemantic textEncoder')
+    textEncoder = {
+      endpoint: validateTextEncoderEndpoint(encoder.endpoint),
+      timeoutMs: validateTextEncoderTimeout(encoder.timeoutMs ?? DEFAULT_TEXT_ENCODER_TIMEOUT_MS),
+    }
+  }
+
+  return {
+    ...(cachePath === undefined ? {} : { cachePath }),
+    ...(textEncoder === undefined ? {} : { textEncoder }),
   }
 }
 
@@ -188,6 +237,22 @@ function requireAbsoluteVmdPath(value: unknown): string {
     throw new Error('Configured motion path must be an absolute VMD path')
   }
   if (extname(value).toLowerCase() !== '.vmd') throw new Error('Configured motion path must reference a VMD file')
+  return value
+}
+
+function requireAbsoluteFeatureCachePath(value: unknown): string {
+  if (
+    typeof value !== 'string'
+    || value.length < 1
+    || value.trim() !== value
+    || value.includes('\u0000')
+    || !isAbsolute(value)
+  ) {
+    throw new Error('Configured motion semantic cachePath must be an absolute path')
+  }
+  if (extname(value).toLowerCase() !== '.json') {
+    throw new Error('Configured motion semantic cachePath must reference a JSON cache file')
+  }
   return value
 }
 
