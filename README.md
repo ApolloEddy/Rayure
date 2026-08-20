@@ -19,9 +19,9 @@ Rayure Behavior
        `- 3D Adapter（保留并后续回归）
 ```
 
-`CHANGELOG.md` 已记录到 0.4.8，但根工作区和各 package manifest 仍标记为 0.2.0。本仓库因此应视为开发快照，而不是已经完成版本统一的 0.4.8 正式发布版。
+`CHANGELOG.md` 已记录到 `0.5.0-dev`（此前的 3D 记录为 0.4.8），但根工作区和各 package manifest 仍标记为 0.2.0。本仓库因此应视为开发快照，而不是已经完成版本统一的正式发布版。
 
-当前统一验证中 51 项测试通过；TypeScript 仍被 `apps/wallpaper/src/main.ts:144` 的 `playEmote` 参数类型不一致阻断。首次公开提交保留这个既有代码状态，后续应先修复并恢复全绿门禁，再开始 Live2D/ARDY 开发。
+当前统一验证中 51 项测试通过；TypeScript 仍被 `apps/wallpaper/src/main.ts:144` 的 `playEmote` 参数类型不一致阻断。这个既有 3D 基线问题单独记录，P0 不扩大范围修复；Live2D 主线先从独立合同和适配器开始。
 
 ## 已实现
 
@@ -54,6 +54,17 @@ Wallpaper Engine / CEF
 ```
 
 详细设计见 [目标架构](docs/architecture.md)，旧项目的保留、改造和淘汰项见 [迁移矩阵](docs/migration-matrix.md)，现有基础验收见 [M0](docs/acceptance/m0-foundation.md) 与 [M1](docs/acceptance/m1-wallpaper-engine-pmx.md)。
+
+## 当前 Live2D 开发切片
+
+第一批 Live2D 基础已经落在仓库中，但还没有打包 Cubism Core 或具体 Live2D 模型：
+
+- `packages/protocol/src/canonical-motion.ts`：严格的 27 关节 `Canonical Motion v1` 合同；
+- `apps/wallpaper/src/live2d/rig-profile.ts`：标准参数 `RigProfile`、身体/头部/手臂投影和范围钳位；
+- `apps/wallpaper/src/live2d/motion-player.ts`：录制动作按时间推进到参数 sink 的回放器；
+- `apps/wallpaper/test/live2d-*.test.ts`：覆盖完整性、异常输入、参数映射、停止和结束状态。
+
+这一步是模型无关的运行时基础。下一步才引入授权明确的 Cubism Web SDK 与开发模型，并把参数 sink 接到真实 ArtMesh/Deformer/Parameter 层。
 
 ## 环境
 
@@ -108,19 +119,21 @@ Copy-Item .\rayure.local.example.json .\rayure.local.json
 - Vite 会复制 `public/` 内容，因此本机含私有素材时生成的 `dist/` 也不得直接上传或分发；
 - 正式发布必须改用明确允许再分发的默认素材，或改为由用户从包外配置自己的素材。
 
+P0 只做两件事：确认私人资源不会进入 Git、`dist` 或发布目录；冻结现有 3D 能力，不继续增加 3D 场景、模型和动作功能。3D 代码保留为回归基线，后续只做必要的安全修复。主要开发方向转为 Live2D。
+
 ## 下一阶段
 
-1. 建立不依赖 PMX/Live2D 的 Canonical Motion 数据契约与回放测试夹具；
-2. 接入一个许可清晰、参数完整的 Live2D 开发模型，并实现标准参数扫描与 `RigProfile`；
-3. 做 ARDY 的独立推理 Spike，实测 RTX 4060 8GB 的显存、首段延迟、连续生成和打断恢复；
-4. 定义 Motion Semantic Feature Cache 与可配置 Text Encoder API，先缓存命中、后 API 回填；
-5. 将 Canonical Motion 映射到 Live2D Controller，并验证 idle、注视、挥手、打断和过渡；
-6. 再接入 TTS/口型、ASR、视觉派生事件和完整 Behavior Controller；
-7. 闭环稳定后，让现有 3D Renderer 作为第二个 Rig Adapter 回归。
+1. 完成资源边界门禁并把现有 3D 标记为冻结回归基线；
+2. 建立不依赖具体 Renderer 的 Canonical Motion 数据契约与回放测试夹具；
+3. 接入许可清晰、参数完整的 Live2D 开发模型，并实现标准参数扫描与 `RigProfile`；
+4. 将 Canonical Motion 映射到 Live2D Controller，先用录制夹具验证 idle、注视、挥手、打断和过渡；
+5. 做 ARDY 的独立推理 Spike，实测 RTX 4060 8GB 的显存、首段延迟、连续生成和打断恢复；
+6. 定义 Motion Semantic Feature Cache 与可配置 Text Encoder API，再接入 TTS/口型、ASR 和视觉派生事件；
+7. Live2D 闭环稳定后，让现有 3D Renderer 作为第二个 Rig Adapter 回归。
 
 ## 尚未完成
 
-- Live2D Renderer、模型导入与一次性 RigProfile 标定；
+- Cubism Web SDK、Live2D 模型导入、ArtMesh/Deformer 绑定与一次性 RigProfile 标定；
 - ARDY/DiP 等生成式动作后端的本机实测与选型；
 - Canonical Motion Buffer、动作打断、约束与执行回执；
 - Motion Semantic Feature 预置库、动态缓存和 Text Encoder API；

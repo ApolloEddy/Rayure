@@ -1,3 +1,5 @@
+export * from './canonical-motion.ts'
+
 export const PROTOCOL_VERSION = 1 as const
 export const MAX_WIRE_MESSAGE_BYTES = 16 * 1024
 
@@ -665,4 +667,3 @@ function requireDurationMs(value: unknown): number {
   }
   return value
 }
-

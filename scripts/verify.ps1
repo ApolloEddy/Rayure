@@ -81,6 +81,39 @@ try {
         throw "Private/model assets entered the wallpaper build:`n$($privateAssets.FullName -join "`n")"
     }
 
+    $trackedFiles = @(git ls-files)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Git tracked-file boundary check failed with exit code $LASTEXITCODE"
+    }
+    $privateTrackedPatterns = @(
+        '^scratch/',
+        '^apps/wallpaper/public/assets/scenes/',
+        '^rayure\.local\.json$',
+        '^assets/private/',
+        '^user-data/',
+        '^models/',
+        '^motions/',
+        '^recordings/'
+    )
+    $trackedPrivateFiles = @(
+        foreach ($trackedFile in $trackedFiles) {
+            $trackedPath = $trackedFile -replace '\\', '/'
+            if ($privateTrackedPatterns | Where-Object { $trackedPath -match $_ }) {
+                $trackedPath
+            }
+        }
+    )
+    if ($trackedPrivateFiles.Count -gt 0) {
+        throw "Private files are tracked by Git:`n$($trackedPrivateFiles -join "`n")"
+    }
+
+    $privateDistPaths = @(Get-ChildItem -LiteralPath $distRoot -Recurse -File | Where-Object {
+        $_.FullName -match '\\assets\\scenes\\' -or $_.FullName -match '\\scratch\\'
+    })
+    if ($privateDistPaths.Count -gt 0) {
+        throw "Private scene or scratch files entered the wallpaper build:`n$($privateDistPaths.FullName -join "`n")"
+    }
+
     if ($indexContent -notmatch 'assets/index-') {
         throw 'Wallpaper index does not reference its local bundled assets'
     }
