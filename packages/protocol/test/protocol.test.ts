@@ -228,3 +228,48 @@ test('motion catalog and emote play messages round-trip through parser', () => {
   assert.equal(emote.type, 'emote.play')
 })
 
+test('Live2D motion descriptors carry the model3 group and index', () => {
+  const message = parseServerMessage(JSON.stringify({
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'motion.catalog',
+    id: 'live2d-catalog-1',
+    payload: {
+      motions: [
+        {
+          id: 'live2d-idle-0',
+          displayName: 'Idle 1',
+          format: 'live2d',
+          url: 'http://127.0.0.1:32145/assets/0123456789abcdef/motions/idle.motion3.json',
+          group: 'Idle',
+          index: 0,
+        },
+      ],
+    },
+  }))
+  assert.equal(message.type, 'motion.catalog')
+  if (message.type !== 'motion.catalog') assert.fail('expected motion.catalog')
+  assert.deepEqual(message.payload.motions[0], {
+    id: 'live2d-idle-0',
+    displayName: 'Idle 1',
+    format: 'live2d',
+    url: 'http://127.0.0.1:32145/assets/0123456789abcdef/motions/idle.motion3.json',
+    group: 'Idle',
+    index: 0,
+  })
+
+  assert.throws(() => parseServerMessage(JSON.stringify({
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'motion.play',
+    id: 'live2d-motion-bad',
+    payload: {
+      motion: {
+        id: 'live2d-idle-0',
+        displayName: 'Idle 1',
+        format: 'live2d',
+        url: 'http://127.0.0.1:32145/assets/0123456789abcdef/motions/idle.motion3.json',
+        group: 'Idle',
+        index: -1,
+      },
+    },
+  })), /motion index/i)
+})

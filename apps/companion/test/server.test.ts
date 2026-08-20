@@ -156,7 +156,14 @@ test('authorized clients receive a tokenized Live2D model3 package', async (t) =
   t.after(() => rm(assetRoot, { recursive: true, force: true }))
   await mkdir(join(assetRoot, 'Hiyori.2048'))
   await mkdir(join(assetRoot, 'motions'))
-  const modelBytes = Buffer.from('{"Version":3}')
+  const modelBytes = Buffer.from(JSON.stringify({
+    Version: 3,
+    FileReferences: {
+      Motions: {
+        Idle: [{ File: 'motions/Hiyori_m01.motion3.json' }],
+      },
+    },
+  }))
   const mocBytes = Buffer.from([0x4d, 0x4f, 0x43, 0x33])
   const textureBytes = Buffer.from([137, 80, 78, 71])
   const motionBytes = Buffer.from('{"Version":3}')
@@ -185,21 +192,33 @@ test('authorized clients receive a tokenized Live2D model3 package', async (t) =
   })
   t.after(() => socket.close())
   await once(socket, 'open')
-  const messages = new Promise<[Buffer, Buffer]>((resolveMessages) => {
+  const messages = new Promise<[Buffer, Buffer, Buffer]>((resolveMessages) => {
     const received: Buffer[] = []
     socket.on('message', (data) => {
       received.push(Buffer.from(data as ArrayBuffer))
-      if (received.length === 2) resolveMessages([received[0]!, received[1]!])
+      if (received.length === 3) resolveMessages([received[0]!, received[1]!, received[2]!])
     })
   })
   socket.send(JSON.stringify(createClientHello({ id: 'hello-live2d-assets', build: 'test' })))
 
-  const [, modelData] = await messages
+  const [, modelData, catalogData] = await messages
   const modelMessage = parseServerMessage(modelData.toString())
   assert.equal(modelMessage.type, 'model.available')
   if (modelMessage.type !== 'model.available') assert.fail('expected model.available')
   assert.equal(modelMessage.payload.model.format, 'live2d')
   assert.equal(modelMessage.payload.model.url.includes(assetRoot), false)
+
+  const catalogMessage = parseServerMessage(catalogData.toString())
+  assert.equal(catalogMessage.type, 'motion.catalog')
+  if (catalogMessage.type !== 'motion.catalog') assert.fail('expected motion.catalog')
+  assert.deepEqual(catalogMessage.payload.motions, [{
+    id: 'live2d-Idle-0',
+    displayName: 'Idle 1',
+    format: 'live2d',
+    url: new URL('motions/Hiyori_m01.motion3.json', modelMessage.payload.model.url).toString(),
+    group: 'Idle',
+    index: 0,
+  }])
 
   const modelResponse = await fetch(modelMessage.payload.model.url, { headers: { Origin: 'null' } })
   assert.equal(modelResponse.status, 200)
@@ -219,7 +238,7 @@ test('authorized clients receive a tokenized Live2D model3 package', async (t) =
   assert.equal(textureResponse.status, 200)
   assert.equal(textureResponse.headers.get('content-length'), String(textureBytes.byteLength))
 
-  const motionResponse = await fetch(new URL('motions/Hiyori_m01.motion3.json', modelMessage.payload.model.url), {
+  const motionResponse = await fetch(catalogMessage.payload.motions[0]!.url, {
     headers: { Origin: 'null' },
   })
   assert.equal(motionResponse.status, 200)

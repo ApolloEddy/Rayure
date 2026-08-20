@@ -17,9 +17,12 @@ import {
   parseClientMessage,
   serializeWireMessage,
 } from '@rayure/protocol'
+import type { Live2dMotionDescriptor, MotionDescriptor } from '@rayure/protocol'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { RawData } from 'ws'
 
+import { readLive2dMotionCatalog } from './live2d-motion-catalog.ts'
+import type { PreparedLive2dMotion } from './live2d-motion-catalog.ts'
 import type { CompanionModelSource, CompanionMotionSource } from './model-source.ts'
 
 const LOOPBACK_HOST = '127.0.0.1' as const
@@ -81,6 +84,7 @@ interface PreparedAsset {
 
 interface PreparedModel extends PreparedAsset {
   source: CompanionModelSource
+  live2dMotions: readonly PreparedLive2dMotion[]
 }
 
 interface PreparedMotion extends PreparedAsset {
@@ -262,16 +266,34 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
           })))
         }
 
+        const motionCatalog: MotionDescriptor[] = []
+        if (model?.source.format === 'live2d' && boundAddress) {
+          for (const motion of model.live2dMotions) {
+            const descriptor: Live2dMotionDescriptor = {
+              id: motion.id,
+              displayName: motion.displayName,
+              format: 'live2d',
+              url: createAssetUrlForPath(boundAddress, model, motion.file),
+              group: motion.group,
+              index: motion.index,
+            }
+            motionCatalog.push(descriptor)
+          }
+        }
         if (preparedMotions.length > 0 && boundAddress) {
+          motionCatalog.push(...preparedMotions.map(motion => ({
+            id: motion.source.id,
+            displayName: motion.source.displayName,
+            format: motion.source.format,
+            url: createAssetUrl(boundAddress, motion),
+            ...(motion.source.loop !== undefined ? { loop: motion.source.loop } : {}),
+          })))
+        }
+
+        if (motionCatalog.length > 0) {
           outbound.push(serializeWireMessage(createServerMotionCatalog({
             id: createId(),
-            motions: preparedMotions.map(motion => ({
-              id: motion.source.id,
-              displayName: motion.source.displayName,
-              format: motion.source.format,
-              url: createAssetUrl(boundAddress, motion),
-              ...(motion.source.loop !== undefined ? { loop: motion.source.loop } : {}),
-            })),
+            motions: motionCatalog,
           })))
         }
 
@@ -384,11 +406,15 @@ async function prepareModel(source: CompanionModelSource, assetToken: string): P
     const label = source.format === 'live2d' ? 'Live2D model3.json' : 'PMX'
     throw new Error(`Companion model entry must be a regular ${label} file`)
   }
+  const live2dMotions = source.format === 'live2d'
+    ? await readLive2dMotionCatalog(entryFilePath)
+    : []
   return {
     source: { ...source, entryFilePath },
     rootPath: dirname(entryFilePath),
     entryFileName: entryFilePath.slice(dirname(entryFilePath).length + 1),
     assetToken,
+    live2dMotions,
   }
 }
 
@@ -566,6 +592,19 @@ function isAllowedBrowserOrigin(origin: string | undefined): boolean {
 function createAssetUrl(address: CompanionServerAddress, asset: PreparedAsset): string {
   const encodedEntry = asset.entryFileName.split(/[\\/]/u).map(encodeURIComponent).join('/')
   return `http://${address.host}:${address.port}/assets/${asset.assetToken}/${encodedEntry}`
+}
+
+function createAssetUrlForPath(
+  address: CompanionServerAddress,
+  asset: PreparedAsset,
+  relativePath: string,
+): string {
+  const encodedPath = relativePath
+    .replaceAll('\\', '/')
+    .split('/')
+    .map(encodeURIComponent)
+    .join('/')
+  return `http://${address.host}:${address.port}/assets/${asset.assetToken}/${encodedPath}`
 }
 
 function parseRequestUrl(request: IncomingMessage): URL | undefined {

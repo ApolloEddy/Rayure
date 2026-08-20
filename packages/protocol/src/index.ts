@@ -66,13 +66,24 @@ export interface ServerModelAvailableMessage {
   }
 }
 
-export interface MotionDescriptor {
+interface MotionDescriptorBase {
   id: string
   displayName: string
-  format: 'vmd'
   url: string
   loop?: boolean
 }
+
+export interface VmdMotionDescriptor extends MotionDescriptorBase {
+  format: 'vmd'
+}
+
+export interface Live2dMotionDescriptor extends MotionDescriptorBase {
+  format: 'live2d'
+  group: string
+  index: number
+}
+
+export type MotionDescriptor = VmdMotionDescriptor | Live2dMotionDescriptor
 
 export interface ServerMotionPlayMessage {
   protocolVersion: typeof PROTOCOL_VERSION
@@ -639,21 +650,43 @@ function requireLoopbackAssetUrl(value: unknown): string {
 
 function requireMotionDescriptor(value: unknown): MotionDescriptor {
   const motion = requireRecord(value, 'motion descriptor')
-  if (motion.loop !== undefined) {
-    requireExactKeys(motion, ['id', 'displayName', 'format', 'url', 'loop'], 'motion descriptor')
-    if (typeof motion.loop !== 'boolean') throw new ProtocolValidationError('motion loop must be boolean')
+  if (motion.format === 'vmd') {
+    if (motion.loop !== undefined) {
+      requireExactKeys(motion, ['id', 'displayName', 'format', 'url', 'loop'], 'VMD motion descriptor')
+      if (typeof motion.loop !== 'boolean') throw new ProtocolValidationError('motion loop must be boolean')
+    }
+    else {
+      requireExactKeys(motion, ['id', 'displayName', 'format', 'url'], 'VMD motion descriptor')
+    }
+    return {
+      id: requireIdentifier(motion.id, 'motion id'),
+      displayName: requireDisplayString(motion.displayName, 'motion displayName', 96),
+      format: 'vmd',
+      url: requireLoopbackAssetUrl(motion.url),
+      ...(motion.loop !== undefined ? { loop: motion.loop } : {}),
+    }
   }
-  else {
-    requireExactKeys(motion, ['id', 'displayName', 'format', 'url'], 'motion descriptor')
+
+  if (motion.format === 'live2d') {
+    if (motion.loop !== undefined) {
+      requireExactKeys(motion, ['id', 'displayName', 'format', 'url', 'group', 'index', 'loop'], 'Live2D motion descriptor')
+      if (typeof motion.loop !== 'boolean') throw new ProtocolValidationError('motion loop must be boolean')
+    }
+    else {
+      requireExactKeys(motion, ['id', 'displayName', 'format', 'url', 'group', 'index'], 'Live2D motion descriptor')
+    }
+    return {
+      id: requireIdentifier(motion.id, 'motion id'),
+      displayName: requireDisplayString(motion.displayName, 'motion displayName', 96),
+      format: 'live2d',
+      url: requireLoopbackAssetUrl(motion.url),
+      group: requireDisplayString(motion.group, 'motion group', 96),
+      index: requireInteger(motion.index, 'motion index', 0, 1024),
+      ...(motion.loop !== undefined ? { loop: motion.loop } : {}),
+    }
   }
-  if (motion.format !== 'vmd') throw new ProtocolValidationError('motion format must be vmd')
-  return {
-    id: requireIdentifier(motion.id, 'motion id'),
-    displayName: requireDisplayString(motion.displayName, 'motion displayName', 96),
-    format: 'vmd',
-    url: requireLoopbackAssetUrl(motion.url),
-    ...(motion.loop !== undefined ? { loop: motion.loop } : {}),
-  }
+
+  throw new ProtocolValidationError('motion format must be vmd or live2d')
 }
 
 function requireWeight(value: unknown): number {
@@ -668,4 +701,11 @@ function requireDurationMs(value: unknown): number {
     throw new ProtocolValidationError('durationMs must be a non-negative safe integer up to 60000')
   }
   return value
+}
+
+function requireInteger(value: unknown, name: string, minimum: number, maximum: number): number {
+  if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+    throw new ProtocolValidationError(`${name} must be an integer from ${minimum} through ${maximum}`)
+  }
+  return value as number
 }

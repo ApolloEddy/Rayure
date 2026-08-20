@@ -12,6 +12,7 @@
 - 新增 `Live2dNativeDebugSurface`，通过显式 `live2dModelUrl` 查询参数加载真实 Cubism 模型，并将 Canonical Motion fixture 驱动到真实参数 sink；引入 `live2d-renderer@0.6.6` 作为开发适配层。
 - 共享 `model.available` 协议新增 `live2d` 模型格式，继续复用令牌化回环 URL 和严格字段校验。
 - Companion 本地配置现在接受绝对 `.model3.json` 入口，并在同一令牌根内提供 Live2D 的 JSON、MOC3、纹理和动作资源；磁盘路径与未允许扩展名仍不会进入协议或 HTTP 响应。
+- Live2D 动作描述符现在携带 `group`/`index`，Companion 会从 `.model3.json` 的 `FileReferences.Motions` 自动生成动作目录，并继续通过同一令牌根发放 `.motion3.json` URL。
 - Wallpaper 收到 `format: live2d` 的 `model.available` 后，会先校验 model3 清单，再创建原生 Cubism 画布；PMX 仍走原有 3D 主机，二者不会互相覆盖。
 
 ### 变更
@@ -29,7 +30,8 @@
 ### 架构影响
 
 - Live2D 主线从参数探针推进到“模型清单校验 → 原生 Cubism 参数驱动”的开发切片；
-- Cubism Core 仍只通过调试时的官方托管地址加载，未复制到 Git、`dist` 或发布包；Live2D 动作目录、离线 Core 来源和 Wallpaper Engine CEF 验收仍是下一步工作。
+- Companion 已完成“模型清单动作组 → 严格动作目录协议”的第一段，动作播放、中断/替换仍由 Wallpaper 原生表面接管；
+- Cubism Core 仍只通过调试时的官方托管地址加载，未复制到 Git、`dist` 或发布包；Live2D 动作播放/打断、离线 Core 来源和 Wallpaper Engine CEF 验收仍是下一步工作。
 
 ## [0.5.1-dev] - 2026-08-20
 
