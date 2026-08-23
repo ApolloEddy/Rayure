@@ -26,6 +26,11 @@ in-process and used as init history for the next request (continuation).
 A Canonical Motion `history` in the request is converted back to the hybrid
 representation via motion_rep.forward when present.
 
+Request `numFrames` means the number of NEW frames for this segment (the
+playback length). ARDY itself generates exactly gen_horizon_len (40) frames
+per autoregressive step with window semantics, so larger requests loop
+multiple steps internally and trim the result; see generate().
+
 Usage (inside the ardy python environment):
   python ardy-bridge.py --checkpoints_dir <dir> [--model core] [--device cuda]
 
@@ -34,6 +39,7 @@ Environment overrides: CHECKPOINTS_DIR, ARDY_BRIDGE_MODEL, ARDY_BRIDGE_DEVICE.
 
 import argparse
 import json
+import os
 import sys
 import threading
 
@@ -55,7 +61,21 @@ RESULT_SCHEMA = "rayure.ardy-process-result.v1"
 ERROR_SCHEMA = "rayure.ardy-process-error.v1"
 MOTION_SCHEMA = "rayure.ardy-motion.v1"
 
-FOOT_CONTACT_JOINTS = {"LeftFoot", "RightFoot"}
+FOOT_CONTACT_JOINT_NAMES = None  # resolved from the skeleton at load time
+
+
+def resolve_foot_contact_names(skeleton):
+    """Maps the 4 foot-contact channels (left heel, left toe, right heel,
+    right toe) to CoreSkeleton27 joint names via the skeleton's own indices."""
+    global FOOT_CONTACT_JOINT_NAMES
+    indices = list(getattr(skeleton, "left_foot_joint_idx", [])) + list(
+        getattr(skeleton, "right_foot_joint_idx", [])
+    )
+    names = [CORE_JOINT_NAMES[i] for i in indices if 0 <= i < len(CORE_JOINT_NAMES)]
+    if len(names) != 4:
+        raise ValueError(f"skeleton foot joint indices do not map to 4 joints: {indices}")
+    FOOT_CONTACT_JOINT_NAMES = names
+    return names
 
 
 class BridgeState:
@@ -74,9 +94,12 @@ class BridgeState:
 def load_bridge_state(checkpoints_dir, model_name, device):
     from ardy.model import load_model
 
-    model = load_model(checkpoint=model_name, checkpoints_dir=checkpoints_dir, device=device,
-                       text_encoder=None)
+    # text_encoder=False is required (None would build the Llama encoder);
+    # the bridge only ever consumes cached Motion Semantic Features.
+    model = load_model(modelname=model_name, checkpoints_dir=checkpoints_dir, device=device,
+                       text_encoder=False)
     model.eval()
+    resolve_foot_contact_names(model.skeleton)
     return BridgeState(model, torch.device(device))
 
 
@@ -109,6 +132,10 @@ def canonical_history_to_tensor(state, history):
     motion via the forward kinematics inverse path; if the installed ardy
     version exposes motion_rep.forward(posed_joints...), use it, otherwise
     the request is rejected with a clear error.
+
+    The tensor length is cropped down to a num_frames_per_token boundary:
+    the model conditions on whole tokens, so a ragged tail would be silently
+    regenerated instead of treated as history.
     """
     forward = getattr(state.motion_rep, "forward", None)
     if not callable(forward):
@@ -125,58 +152,96 @@ def canonical_history_to_tensor(state, history):
     posed = torch.from_numpy(posed).to(state.device).permute(1, 0, 2, 3)  # [1, T, J, 3]
     normalized = state.motion_rep.normalize(posed)
     motion_tensor = state.motion_rep.forward(normalized, is_normalized=True)
-    return motion_tensor
+    nfp = max(1, int(getattr(state.model, "num_frames_per_token", 1)))
+    aligned = (int(motion_tensor.shape[1]) // nfp) * nfp
+    if aligned <= 0:
+        raise ValueError("history is shorter than one motion token")
+    return motion_tensor[:, :aligned]
 
 
 def generate(state, request):
+    """Generates up to numFrames NEW frames (request semantics: segment length).
+
+    ARDY's autoregressive_step has window semantics instead (verified in the
+    2026-08-23 spike):
+
+    - num_frames is the WHOLE window (history + generation [+ future context]),
+      must be a multiple of num_frames_per_token, and each call generates
+      exactly gen_horizon_len (40) new frames regardless of the window size;
+    - the return value contains history + the new frames, so the history part
+      must be sliced off (the spike script's torch.cat double-counted it);
+    - history is recentered per step and world-anchored to its input, so each
+      step is decoded separately and only its new tail is kept - the decoded
+      tails concatenate into a world-consistent trajectory.
+
+    A request for more than gen_horizon_len frames runs multiple steps; the
+    accumulated new frames are trimmed to numFrames at the end.
+    """
     request_id = request["requestId"]
     text_feature = request.get("textFeature")
     if not text_feature:
         raise ValueError("textFeature is required")
-    num_frames = int(request["numFrames"])
+    want = int(request["numFrames"])
     num_denoising_steps = int(request["numDenoisingSteps"])
     cfg_weight = float(request["cfgWeight"])
 
     text_feat, text_pad_mask = feature_to_tensors(state, text_feature)
 
+    gen_horizon = int(getattr(state.model, "gen_horizon_len", 40))
+    nfp = max(1, int(getattr(state.model, "num_frames_per_token", 1)))
+    # Trained window budget: 10 s * fps; history must leave room for one horizon.
+    max_window = max(gen_horizon + nfp, int(round(float(state.fps) * 10.0)))
+    max_history = max(nfp, (max_window - gen_horizon) // nfp * nfp)
+
     with state.lock:
-        history_tensor = state.last_motion_tensor
-        if history_tensor is None and request.get("history"):
-            history_tensor = canonical_history_to_tensor(state, request["history"])
+        history = state.last_motion_tensor
+        if history is None and request.get("history"):
+            history = canonical_history_to_tensor(state, request["history"])
 
-        init_global_translation = None
-        init_first_heading_angle = None
-        if history_tensor is None:
-            init_global_translation = torch.zeros(1, 3, device=state.device)
-            init_first_heading_angle = torch.zeros(1, device=state.device)
+        steps = max(1, -(-want // gen_horizon))
+        new_posed, new_rots, new_contacts = [], [], []
+        for _ in range(steps):
+            if history is not None and int(history.shape[1]) > max_history:
+                history = history[:, -max_history:]
+            hist_len = 0 if history is None else int(history.shape[1])
+            window = hist_len + gen_horizon
 
-        with torch.inference_mode():
-            samples = state.model.autoregressive_step(
-                num_frames=num_frames,
-                num_denoising_steps=num_denoising_steps,
-                motion_mask=None,
-                observed_motion=None,
-                cfg_weight=(cfg_weight, cfg_weight),
-                texts=None,
-                text_feat=text_feat,
-                text_pad_mask=text_pad_mask,
-                init_history_sequence=history_tensor,
-                init_global_translation=init_global_translation,
-                init_first_heading_angle=init_first_heading_angle,
-            )
-            # Keep the full generated motion for the next continuation step.
-            state.last_motion_tensor = samples
+            init_global_translation = None
+            init_first_heading_angle = None
+            if history is None:
+                init_global_translation = torch.zeros(1, 3, device=state.device)
+                init_first_heading_angle = torch.zeros(1, device=state.device)
 
-            samples_unnormalized = state.motion_rep.unnormalize(samples)
-            pred = state.motion_rep.inverse(samples_unnormalized, is_normalized=False)
+            with torch.inference_mode():
+                samples = state.model.autoregressive_step(
+                    num_frames=window,
+                    num_denoising_steps=num_denoising_steps,
+                    motion_mask=None,
+                    observed_motion=None,
+                    cfg_weight=(cfg_weight, cfg_weight),
+                    texts=None,
+                    text_feat=text_feat,
+                    text_pad_mask=text_pad_mask,
+                    init_history_sequence=history,
+                    init_global_translation=init_global_translation,
+                    init_first_heading_angle=init_first_heading_angle,
+                )
+                # Keep the full window as history (already nfp-aligned) so the
+                # next step continues from the latest generated pose.
+                history = samples
 
-        posed_joints = pred["posed_joints"]  # [1, T, J, 3]
-        global_rot_mats = pred.get("global_rot_mats")  # [1, T, J, 3, 3] optional
-        foot_contacts = pred.get("foot_contacts")  # [1, T, J] optional
+                pred = decode_window(state, samples)
+                new_posed.append(pred["posed"][hist_len:])
+                if pred["rots"] is not None:
+                    new_rots.append(pred["rots"][hist_len:])
+                if pred["contacts"] is not None:
+                    new_contacts.append(pred["contacts"][hist_len:])
 
-        posed = posed_joints[0].float().cpu().numpy()
-        rots = global_rot_mats[0].float().cpu().numpy() if global_rot_mats is not None else None
-        contacts = foot_contacts[0].float().cpu().numpy() if foot_contacts is not None else None
+        state.last_motion_tensor = history
+
+        posed = np.concatenate(new_posed, axis=0)[:want]
+        rots = np.concatenate(new_rots, axis=0)[:want] if new_rots else None
+        contacts = np.concatenate(new_contacts, axis=0)[:want] if new_contacts else None
 
         fps = float(state.fps)
         step_ms = 1000.0 / fps if fps > 0 else 50.0
@@ -200,8 +265,8 @@ def generate(state, request):
             }
             if contacts is not None:
                 touched = [
-                    name for j, name in enumerate(CORE_JOINT_NAMES)
-                    if contacts[t, j] > 0.5 and name in FOOT_CONTACT_JOINTS
+                    name for c, name in enumerate(FOOT_CONTACT_JOINT_NAMES)
+                    if contacts[t, c] > 0.5
                 ]
                 if touched:
                     frame["footContacts"] = touched
@@ -215,6 +280,21 @@ def generate(state, request):
         "frames": frames,
     }
     return {"schema": RESULT_SCHEMA, "type": "result", "requestId": request_id, "motion": motion}
+
+
+def decode_window(state, samples):
+    """Decodes one full window (normalized hybrid) into explicit motion arrays."""
+    with torch.inference_mode():
+        samples_unnormalized = state.motion_rep.unnormalize(samples)
+        pred = state.motion_rep.inverse(samples_unnormalized, is_normalized=False)
+    posed_joints = pred["posed_joints"]  # [1, T, J, 3]
+    global_rot_mats = pred.get("global_rot_mats")  # [1, T, J, 3, 3] optional
+    foot_contacts = pred.get("foot_contacts")  # [1, T, J] optional
+    return {
+        "posed": posed_joints[0].float().cpu().numpy(),
+        "rots": global_rot_mats[0].float().cpu().numpy() if global_rot_mats is not None else None,
+        "contacts": foot_contacts[0].float().cpu().numpy() if foot_contacts is not None else None,
+    }
 
 
 def rotation_matrix_to_quaternion(matrix):
@@ -252,6 +332,29 @@ def rotation_matrix_to_quaternion(matrix):
             round(float(z / norm), 6), round(float(w / norm), 6)]
 
 
+class ProtocolWriter:
+    """Writes JSONL responses on the real stdout while fd 1 is redirected.
+
+    ARDY and its dependencies print diagnostics (model config, warnings) to
+    stdout, which would corrupt the JSONL protocol stream. The bridge
+    therefore points fd 1 at stderr for its whole lifetime and keeps the
+    original stdout for protocol writes only.
+    """
+
+    def __init__(self):
+        sys.stdout.flush()
+        self._saved_fd = os.dup(1)
+        os.dup2(sys.stderr.fileno(), 1)
+        self._stream = os.fdopen(self._saved_fd, "w", encoding="utf-8")
+
+    def write_line(self, payload):
+        self._stream.write(json.dumps(payload) + "\n")
+        self._stream.flush()
+
+
+_writer = None  # created in main() before any load can print
+
+
 def emit_error(request_id, code, message):
     payload = {
         "schema": ERROR_SCHEMA,
@@ -260,16 +363,23 @@ def emit_error(request_id, code, message):
         "code": code,
         "message": message[:512],
     }
-    sys.stdout.write(json.dumps(payload) + "\n")
-    sys.stdout.flush()
+    _writer.write_line(payload)
 
 
 def main():
+    global _writer
+    _writer = ProtocolWriter()
+
     parser = argparse.ArgumentParser(description="Rayure ARDY JSONL bridge")
     parser.add_argument("--checkpoints_dir", default=None)
     parser.add_argument("--model", default=None)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--ardy_path", default=None,
+                        help="path to the ardy source tree (when not pip-installed)")
     args = parser.parse_args()
+
+    if args.ardy_path:
+        sys.path.insert(0, args.ardy_path)
 
     checkpoints_dir = args.checkpoints_dir or os_env("CHECKPOINTS_DIR")
     model_name = args.model or os_env("ARDY_BRIDGE_MODEL") or "core"
@@ -306,14 +416,11 @@ def main():
         except Exception as cause:  # noqa: BLE001 - per-request isolation
             emit_error(request_id, "generation_failed", str(cause))
             continue
-        sys.stdout.write(json.dumps(result) + "\n")
-        sys.stdout.flush()
+        _writer.write_line(result)
     return 0
 
 
 def os_env(name):
-    import os
-
     return os.environ.get(name)
 
 

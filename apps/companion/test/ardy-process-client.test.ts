@@ -25,28 +25,37 @@ function makeFeature(): MotionSemanticFeature {
   }
 }
 
-function makeBridgeScript(mode: 'result' | 'silent'): string {
+function makeBridgeScript(mode: 'result' | 'silent' | 'delay-first'): string {
   const jointNames = JSON.stringify(ARDY_CORE_JOINT_NAMES)
   return `
 import readline from 'node:readline'
 const jointNames = ${jointNames}
 const input = readline.createInterface({ input: process.stdin })
+let first = true
 input.on('line', line => {
   const request = JSON.parse(line)
   if (${JSON.stringify(mode)} === 'silent') return
-  const joints = Object.fromEntries(jointNames.map(name => [name, { position: [0, 1, 0], rotation: [0, 0, 0, 1] }]))
-  process.stdout.write(JSON.stringify({
-    schema: 'rayure.ardy-process-result.v1',
-    type: 'result',
-    requestId: request.requestId,
-    motion: {
-      schema: 'rayure.ardy-motion.v1',
-      backend: 'ardy-core',
-      fps: 20,
-      jointNames,
-      frames: [{ timeMs: 0, rootPosition: [0, 0, 0], rootRotation: [0, 0, 0, 1], joints }],
-    },
-  }) + '\\n')
+  const respond = () => {
+    const joints = Object.fromEntries(jointNames.map(name => [name, { position: [0, 1, 0], rotation: [0, 0, 0, 1] }]))
+    process.stdout.write(JSON.stringify({
+      schema: 'rayure.ardy-process-result.v1',
+      type: 'result',
+      requestId: request.requestId,
+      motion: {
+        schema: 'rayure.ardy-motion.v1',
+        backend: 'ardy-core',
+        fps: 20,
+        jointNames,
+        frames: [{ timeMs: 0, rootPosition: [0, 0, 0], rootRotation: [0, 0, 0, 1], joints }],
+      },
+    }) + '\\n')
+  }
+  if (${JSON.stringify(mode)} === 'delay-first' && first) {
+    first = false
+    setTimeout(respond, 600)
+    return
+  }
+  respond()
 })
 `
 }
@@ -92,15 +101,18 @@ test('ARDY process client times out a silent bridge and does not leave a pending
   )
 })
 
-test('ARDY process client aborts generation and terminates the bridge', async (t) => {
+test('ARDY process client abort abandons the wait but keeps the bridge usable', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'rayure-ardy-process-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const bridgePath = join(root, 'bridge.mjs')
-  await writeFile(bridgePath, makeBridgeScript('silent'), 'utf8')
+  // The first request responds late (600ms): the abort abandons it, and the
+  // late response line must be dropped as stale instead of rejecting the
+  // follow-up request.
+  await writeFile(bridgePath, makeBridgeScript('delay-first'), 'utf8')
   const client = new ArdyProcessClient({
     command: process.execPath,
     args: [bridgePath],
-    requestTimeoutMs: 5_000,
+    requestTimeoutMs: 10_000,
   })
   t.after(() => client.close())
   const controller = new AbortController()
@@ -114,10 +126,15 @@ test('ARDY process client aborts generation and terminates the bridge', async (t
   controller.abort()
 
   await assert.rejects(pending, /abort/i)
-  await assert.rejects(client.generate({
+
+  // The bridge is still alive: the next request resolves normally and the
+  // abandoned step's late response arrives while it is pending.
+  const result = await client.generate({
     textFeature: makeFeature(),
     numFrames: 40,
     numDenoisingSteps: 4,
     cfgWeight: 2,
-  }), /closed|terminated/i)
+  })
+  assert.equal(result.motion.jointSetId, 'ardy-core-27')
+  assert.equal(result.motion.frames.length, 1)
 })

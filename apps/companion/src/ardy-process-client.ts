@@ -66,6 +66,12 @@ export class ArdyProcessClient {
     this.#child.stderr.setEncoding('utf8')
     this.#child.stdout.on('data', (chunk: string) => this.#consumeStdout(chunk))
     this.#child.stderr.on('data', (chunk: string) => this.#consumeStderr(chunk))
+    // A dead bridge closes stdin asynchronously: without this handler the
+    // EPIPE/EOF 'error' event on the write side is unhandled and crashes the
+    // whole companion process. Route it into the pending-request failure path.
+    this.#child.stdin.on('error', (cause: NodeJS.ErrnoException) => {
+      this.#handleProcessFailure(new Error(`ARDY process stdin failed: ${cause.code ?? cause.message}`))
+    })
     this.#child.on('error', cause => this.#handleProcessFailure(cause))
     this.#child.on('close', (code, signal) => {
       this.#closed = true
@@ -107,8 +113,12 @@ export class ArdyProcessClient {
       }
       if (input.signal !== undefined) {
         pending.abortHandler = () => {
+          // Abandon the wait only: the bridge loop is synchronous, so the
+          // in-flight step finishes and its late response line is dropped as
+          // stale in #consumeStdout. Killing the process here would break
+          // every later generation (preemption is a normal scheduling event,
+          // not a fatal one).
           this.#rejectPending(new Error('ARDY generation aborted'))
-          void this.close()
         }
         input.signal.addEventListener('abort', pending.abortHandler, { once: true })
       }
@@ -158,6 +168,7 @@ export class ArdyProcessClient {
       this.#stdoutBuffer = this.#stdoutBuffer.slice(newlineIndex + 1)
       if (line.length > 0 && this.#pending !== undefined) {
         const pending = this.#pending
+        if (isStaleArdyResponseLine(line, pending.requestId)) continue
         try {
           const result = parseArdyMotionResponse(line, pending.requestId)
           this.#settlePending(result)
@@ -209,6 +220,25 @@ export class ArdyProcessClient {
     const trimmed = this.#stderrBuffer.trim()
     return trimmed.length === 0 ? '' : ` stderr=${trimmed.slice(-512)}`
   }
+}
+
+/**
+ * A response line left over from an abandoned (aborted or timed-out) request.
+ * The bridge finishes such a step and prints its result after a newer request
+ * may already be pending; those late lines must be dropped instead of
+ * rejecting the active request via the requestId-mismatch path.
+ */
+function isStaleArdyResponseLine(line: string, activeRequestId: string): boolean {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(line)
+  }
+  catch {
+    return false
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false
+  const requestId = (parsed as { requestId?: unknown }).requestId
+  return typeof requestId === 'string' && requestId !== activeRequestId
 }
 
 export function validateArdyProcessCommand(value: unknown): string {
