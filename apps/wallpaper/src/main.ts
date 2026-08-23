@@ -179,11 +179,13 @@ async function handleModelAvailable(model: ModelDescriptor): Promise<void> {
     live2dCompanionMotionCatalog = []
     pendingLive2dMotion = undefined
     renderLive2dMotionToolbar([])
+    scene.setDecorVisible(true)
     void scene.loadModel(model)
     return
   }
 
   if (live2dQuerySurface !== undefined) return
+  scene.setDecorVisible(false)
   const generation = ++live2dCompanionGeneration
   live2dCompanionModel = model
   pendingLive2dMotion = undefined

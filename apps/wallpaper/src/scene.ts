@@ -50,6 +50,7 @@ export class RayureScene {
   readonly #coreMaterial: MeshPhysicalMaterial
   readonly #ringMaterials: MeshPhysicalMaterial[]
   readonly #particlesMaterial: PointsMaterial
+  readonly #particles: Points
   #fps = 30
   #paused = false
   #disposed = false
@@ -124,7 +125,8 @@ export class RayureScene {
       blending: AdditiveBlending,
       depthWrite: false,
     })
-    this.#scene.add(createParticleField(this.#particlesMaterial))
+    this.#particles = createParticleField(this.#particlesMaterial)
+    this.#scene.add(this.#particles)
 
     window.addEventListener('resize', this.#resize)
     window.addEventListener('pointermove', this.#onPointerMove, { passive: true })
@@ -159,6 +161,16 @@ export class RayureScene {
 
   setModelScale(scale: number): void {
     this.#avatar.scale.setScalar(scale)
+  }
+
+  /**
+   * Toggles the 3D placeholder decoration (core orb, rings, particles).
+   * Live2D playback draws on its own canvas, so the placeholder must be
+   * hidden to keep it from sitting behind the character.
+   */
+  setDecorVisible(visible: boolean): void {
+    this.#placeholder.visible = visible
+    this.#particles.visible = visible
   }
 
   loadModel(descriptor: ModelDescriptor): Promise<MmdModelLoadOutcome> {

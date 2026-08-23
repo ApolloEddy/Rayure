@@ -125,7 +125,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
         autoInteraction: false,
         tapInteraction: false,
         randomMotion: false,
-        keepAspect: true,
+        keepAspect: false,
         cubismCorePath: this.#coreUrl,
         enableMotion: false,
         enableExpression: false,

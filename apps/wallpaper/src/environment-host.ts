@@ -24,8 +24,8 @@ export class EnvironmentHost {
 
       // 1. 加载和风室内原画烘焙高精贴图
       const textureLoader = new THREE.TextureLoader()
-      const roomTexture = await new Promise<THREE.Texture>((resolve) => {
-        textureLoader.load('/assets/scenes/japanese_room.png', resolve)
+      const roomTexture = await new Promise<THREE.Texture>((resolve, reject) => {
+        textureLoader.load('/assets/scenes/japanese_room.png', resolve, undefined, reject)
       })
       roomTexture.colorSpace = THREE.SRGBColorSpace
 
