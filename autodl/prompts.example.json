@@ -1,0 +1,58 @@
+[
+  {
+    "cacheKey": "wave.casual",
+    "prompt": "A person waves their hand casually"
+  },
+  {
+    "cacheKey": "walk.forward",
+    "prompt": "A person walks forward slowly"
+  },
+  {
+    "cacheKey": "idle.stand",
+    "prompt": "A person stands still"
+  },
+  {
+    "cacheKey": "wave.happy",
+    "prompt": "A person waves happily with a smile"
+  },
+  {
+    "cacheKey": "walk.backward",
+    "prompt": "A person walks backward carefully"
+  },
+  {
+    "cacheKey": "walk.turn",
+    "prompt": "A person walks and turns around"
+  },
+  {
+    "cacheKey": "sit.chair",
+    "prompt": "A person sits down on a chair"
+  },
+  {
+    "cacheKey": "stand.up",
+    "prompt": "A person stands up from sitting"
+  },
+  {
+    "cacheKey": "greet.bow",
+    "prompt": "A person bows slightly to greet someone"
+  },
+  {
+    "cacheKey": "gesture.point",
+    "prompt": "A person points at something in front of them"
+  },
+  {
+    "cacheKey": "gesture.thinking",
+    "prompt": "A person puts a hand on their chin, thinking"
+  },
+  {
+    "cacheKey": "dance.light",
+    "prompt": "A person does a light dance step"
+  },
+  {
+    "cacheKey": "jump.cheer",
+    "prompt": "A person jumps up and cheers"
+  },
+  {
+    "cacheKey": "headshake.deny",
+    "prompt": "A person shakes their head"
+  }
+]

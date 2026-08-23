@@ -11,7 +11,7 @@ import {
 import type { MotionSemanticFeature, MotionSemanticFeatureDtype } from '@rayure/protocol'
 
 export const MOTION_SEMANTIC_CACHE_FILE_SCHEMA = 'rayure.motion-semantic-cache.v1' as const
-export const MAX_MOTION_SEMANTIC_CACHE_FILE_BYTES = 256 * 1024 * 1024
+export const MAX_MOTION_SEMANTIC_CACHE_FILE_BYTES = 512 * 1024 * 1024
 export const MAX_MOTION_SEMANTIC_CACHE_ENTRIES = 100_000
 
 export interface MotionSemanticFeatureCacheFileEntry {
@@ -37,7 +37,7 @@ export async function loadMotionSemanticFeatureCacheFile(
 ): Promise<readonly MotionSemanticFeature[]> {
   const raw = await readFile(filePath)
   if (raw.byteLength > MAX_MOTION_SEMANTIC_CACHE_FILE_BYTES) {
-    throw new Error('Motion semantic feature cache exceeds 256 MiB')
+    throw new Error('Motion semantic feature cache exceeds 512 MiB')
   }
   return parseMotionSemanticFeatureCache(raw.toString('utf8'))
 }
@@ -162,7 +162,7 @@ export async function writeMotionSemanticFeatureCacheFile(
   const raw = serializeMotionSemanticFeatureCache(features)
   const byteLength = Buffer.byteLength(raw, 'utf8')
   if (byteLength > MAX_MOTION_SEMANTIC_CACHE_FILE_BYTES) {
-    throw new Error('Motion semantic feature cache exceeds 256 MiB')
+    throw new Error('Motion semantic feature cache exceeds 512 MiB')
   }
 
   await mkdir(dirname(filePath), { recursive: true })
