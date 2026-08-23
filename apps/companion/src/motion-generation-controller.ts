@@ -8,9 +8,13 @@ import type {
 } from './motion-scheduler.ts'
 
 export interface MotionGenerationControllerOptions {
-  generate: (intent: MotionScheduleIntent) => Promise<CanonicalMotion>
+  generate: (
+    intent: MotionScheduleIntent,
+    history: CanonicalMotion | undefined,
+  ) => Promise<CanonicalMotion>
   publish: (input: { id: string, displayName: string, motion: CanonicalMotion }) => unknown
   onStatus?: ((status: MotionGenerationStatus) => void) | undefined
+  onError?: ((cause: unknown, intentId: string) => void) | undefined
 }
 
 export interface MotionGenerationStatus {
@@ -35,10 +39,12 @@ export class MotionGenerationController {
   readonly #scheduler: MotionScheduler
   readonly #publish: MotionGenerationControllerOptions['publish']
   readonly #onStatus: MotionGenerationControllerOptions['onStatus']
+  readonly #onError: MotionGenerationControllerOptions['onError']
 
   constructor(options: MotionGenerationControllerOptions) {
     this.#publish = options.publish
     this.#onStatus = options.onStatus
+    this.#onError = options.onError
     this.#scheduler = new MotionScheduler({
       generator: options.generate,
       onSegmentReady: (segment) => {
@@ -69,22 +75,39 @@ export class MotionGenerationController {
     return this.#scheduler.solicit(intent).then((segment) => {
       this.#onStatus?.({ intentId: segment.intentId, phase: 'ready' })
       return segment
+    }).catch((cause: unknown) => {
+      this.#onStatus?.({ intentId: intent.id, phase: 'superseded' })
+      throw cause
     })
   }
 
   /**
-   * Replays configured startup presets as intents. Failures are fatal so a
-   * misconfigured preset fails loudly at boot instead of running silently.
+   * Replays configured startup presets as intents. A failing preset is reported
+   * through `onError` and skipped so one bad entry cannot take Companion down;
+   * remaining presets still run.
    */
   async runStartup(presets: readonly RayureMotionGeneratePreset[]): Promise<void> {
     for (const preset of presets) {
-      await this.submitIntent({
-        id: preset.id,
-        prompt: preset.prompt,
-        ...(preset.numFrames === undefined ? {} : { numFrames: preset.numFrames }),
-        ...(preset.numDenoisingSteps === undefined ? {} : { numDenoisingSteps: preset.numDenoisingSteps }),
-        ...(preset.cfgWeight === undefined ? {} : { cfgWeight: preset.cfgWeight }),
-      })
+      try {
+        await this.submitIntent({
+          id: preset.id,
+          prompt: preset.prompt,
+          ...(preset.numFrames === undefined ? {} : { numFrames: preset.numFrames }),
+          ...(preset.numDenoisingSteps === undefined ? {} : { numDenoisingSteps: preset.numDenoisingSteps }),
+          ...(preset.cfgWeight === undefined ? {} : { cfgWeight: preset.cfgWeight }),
+        })
+        // Sequential presets compose: treat the completed segment as consumed
+        // history so the next preset continues from it instead of a T-pose.
+        this.#scheduler.skipToEnd()
+      }
+      catch (cause) {
+        try {
+          this.#onError?.(cause, preset.id)
+        }
+        catch {
+          // An error reporter must not prevent startup from continuing.
+        }
+      }
     }
   }
 

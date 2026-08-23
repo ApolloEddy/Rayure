@@ -90,17 +90,23 @@ function createGenerationController(
   if (config.motionSemantic?.ardy === undefined) return undefined
   const service = runtime.createGenerationService()
   return new MotionGenerationController({
-    generate: async (intent) => {
+    generate: async (intent, history) => {
       const result = await service.generate({
         cacheKey: intent.id,
         canonicalPrompt: intent.prompt,
         numFrames: intent.numFrames ?? 60,
         numDenoisingSteps: intent.numDenoisingSteps ?? 4,
         cfgWeight: intent.cfgWeight ?? 2,
+        ...(intent.signal === undefined ? {} : { signal: intent.signal }),
+        ...(history === undefined ? {} : { history }),
       })
       return result.motion
     },
     publish: input => server.publishMotion(input),
+    onError: (cause, intentId) => {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      process.stderr.write(`${JSON.stringify({ event: 'motion.generate.error', intentId, message })}\n`)
+    },
   })
 }
 

@@ -49,7 +49,8 @@ export class MotionScheduler {
   #buffer: CanonicalMotion | undefined
   #bufferSegment: MotionScheduleSegment | undefined
   #lastConsumedMs = -1
-  #activeIntentId: string | undefined
+  #activeController: AbortController | undefined
+  #tail: Promise<unknown> = Promise.resolve()
   #active = false
   #segmentId = 0
 
@@ -77,18 +78,37 @@ export class MotionScheduler {
 
   /**
    * Requests a new segment for the given intent. Any in-flight generation is
-   * superseded: its segmentId is invalidated so a late result is discarded,
-   * and the new intent's own generation owns the result. History continuation
-   * uses whatever buffer frames have been consumed so far, so the next segment
-   * continues from the current pose instead of a fixed T-pose.
+   * cancelled via its AbortController so the backend can release the single
+   * ARDY process slot, and history continuation feeds whatever buffer frames
+   * have been consumed so the next segment continues from the current pose
+   * instead of a fixed T-pose.
+   *
+   * A caller-provided `intent.signal` is chained into our controller so both
+   * external cancellation and preemption abort the same work.
    */
   solicit(intent: MotionScheduleIntent): Promise<MotionScheduleSegment> {
     const segmentId = ++this.#segmentId
+    const controller = new AbortController()
+    // Cancel any prior in-flight generation to free the single backend slot.
+    this.#activeController?.abort()
+    this.#activeController = controller
     this.#active = true
-    this.#activeIntentId = intent.id
+    const signal = linkSignals(controller.signal, intent.signal)
     const history = this.#consumedHistory()
-    return this.#generator(intent, history).then((motion) => {
-      if (this.#segmentId !== segmentId) throw new Error('Motion scheduler segment was superseded')
+
+    // Serialize against the single backend: a new intent waits until the prior
+    // request has fully settled (released the slot) before invoking the
+    // generator, so a single-flight backend is never double-occupied.
+    const task = this.#tail.then(() => {
+      if (signal.aborted) throw new Error('Motion scheduler segment was superseded')
+      return this.#generator({ ...intent, signal }, history)
+    })
+    this.#tail = task.catch(() => { /* tail is only a sequencing barrier */ })
+
+    return task.then((motion) => {
+      if (this.#segmentId !== segmentId || signal.aborted) {
+        throw new Error('Motion scheduler segment was superseded')
+      }
       validateCanonicalMotion(motion)
       const segment: MotionScheduleSegment = {
         intentId: intent.id,
@@ -99,7 +119,9 @@ export class MotionScheduler {
       this.#onSegmentReady?.(segment)
       return segment
     }).finally(() => {
-      if (this.#activeIntentId === intent.id) this.#active = false
+      if (this.#segmentId === segmentId) {
+        this.#active = false
+      }
     })
   }
 
@@ -119,14 +141,30 @@ export class MotionScheduler {
     return frames
   }
 
+  /**
+   * Treats the entire current buffer as consumed and returns it as history.
+   * Used by sequential composition (e.g. startup presets) where each next
+   * segment should continue from the prior one rather than a fixed T-pose.
+   */
+  skipToEnd(): CanonicalMotion | undefined {
+    const buffer = this.#buffer
+    if (buffer === undefined || buffer.frames.length === 0) return undefined
+    this.#lastConsumedMs = buffer.frames[buffer.frames.length - 1]?.timeMs ?? this.#lastConsumedMs
+    return buffer
+  }
+
   clear(): void {
     this.#segmentId += 1
+    this.#activeController?.abort()
+    this.#activeController = undefined
     this.#buffer = undefined
     this.#bufferSegment = undefined
     this.#lastConsumedMs = -1
   }
 
   dispose(): void {
+    this.#activeController?.abort()
+    this.#activeController = undefined
     this.#buffer = undefined
     this.#consumers.clear()
     this.#segmentId += 1
@@ -148,4 +186,19 @@ export class MotionScheduler {
       frames: consumed,
     }
   }
+}
+
+/**
+ * Returns a signal that aborts when the scheduler's own controller OR the
+ * caller-provided signal aborts. A missing caller signal degrades to the
+ * scheduler controller alone.
+ */
+function linkSignals(primary: AbortSignal, external: AbortSignal | undefined): AbortSignal {
+  if (external === undefined) return primary
+  if (primary.aborted || external.aborted) {
+    if (!primary.aborted) primary.dispatchEvent(new Event('abort'))
+    return external
+  }
+  external.addEventListener('abort', () => primary.dispatchEvent(new Event('abort')), { once: true })
+  return external
 }

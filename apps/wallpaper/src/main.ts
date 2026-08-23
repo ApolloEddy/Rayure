@@ -1,6 +1,6 @@
 import './style.css'
 
-import type { Live2dMotionDescriptor, ModelDescriptor, MotionDescriptor } from '@rayure/protocol'
+import type { CanonicalMotion, Live2dMotionDescriptor, ModelDescriptor, MotionDescriptor } from '@rayure/protocol'
 import { CompanionClient } from './companion-client.ts'
 import { loadCanonicalMotion } from './live2d/canonical-motion-client.ts'
 import type { CompanionConnectionSnapshot } from './companion-client.ts'
@@ -231,18 +231,25 @@ function requestLive2dMotion(motion: Live2dMotionDescriptor): void {
  * Handles a generated Canonical Motion announced by Companion. Only the
  * canonical format is consumed here; it is fetched over the tokenized loopback
  * gateway, validated, and played on the native surface as a runtime motion.
- * Failures surface silently to the debug status; a healthy renderer skips them.
+ * A generation guard drops late results so an older intent can never overwrite
+ * a newer action that has already started playing. Failures surface silently
+ * to the debug status; a healthy renderer skips them.
  */
+let motionPublishedGeneration = 0
 async function handleMotionPublished(motion: MotionDescriptor): Promise<void> {
   if (motion.format !== 'canonical' || live2dCompanionModel?.format !== 'live2d') return
   if (!live2dCompanionSurface?.isReady) return
+  const generation = ++motionPublishedGeneration
+  let canonical: CanonicalMotion
   try {
-    const canonical = await loadCanonicalMotion(motion.url)
-    live2dCompanionSurface.playGeneratedMotion(canonical, motion)
+    canonical = await loadCanonicalMotion(motion.url)
   }
   catch {
-    live2dCompanionSurface.stopGeneratedMotion()
+    if (generation === motionPublishedGeneration) live2dCompanionSurface.stopGeneratedMotion()
+    return
   }
+  if (generation !== motionPublishedGeneration) return
+  live2dCompanionSurface.playGeneratedMotion(canonical, motion)
 }
 
 function renderConnectionStatus(snapshot: CompanionConnectionSnapshot): void {

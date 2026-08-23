@@ -86,6 +86,57 @@ test('runStartup publishes every preset in order', async () => {
   assert.deepEqual(published.map(p => p.id), ['idle', 'wave'])
 })
 
+test('runStartup feeds the completed segment as history to the next intent', async () => {
+  const seenHistory: Array<CanonicalMotion | undefined> = []
+  let generateCalls = 0
+  const controller = new MotionGenerationController({
+    generate: async (_intent, history) => {
+      generateCalls += 1
+      seenHistory.push(history)
+      return makeMotion()
+    },
+    publish: () => undefined,
+  })
+  await controller.runStartup([
+    { id: 'idle', prompt: 'stand calm' },
+    { id: 'wave', prompt: 'friendly wave' },
+  ])
+  assert.equal(generateCalls, 2)
+  // First call has no prior segment; the second continues from the first.
+  assert.equal(seenHistory[0], undefined)
+  const history = seenHistory[1]
+  assert.ok(history)
+  assert.equal(history.frames.length, 2)
+})
+
+test('runStartup reports a failing preset and continues with the rest', async () => {
+  const published: string[] = []
+  const errors: Array<[string, string]> = []
+  let generateCalls = 0
+  const controller = new MotionGenerationController({
+    generate: async (intent) => {
+      generateCalls += 1
+      if (intent.id === 'broken') throw new Error('backend failed')
+      return makeMotion()
+    },
+    publish: (input) => {
+      published.push(input.id)
+      return undefined
+    },
+    onError: (cause, intentId) => errors.push([intentId, cause instanceof Error ? cause.message : String(cause)]),
+  })
+
+  await controller.runStartup([
+    { id: 'idle', prompt: 'stand calm' },
+    { id: 'broken', prompt: 'will fail' },
+    { id: 'wave', prompt: 'friendly wave' },
+  ])
+
+  assert.deepEqual(errors, [['broken', 'backend failed']])
+  assert.deepEqual(published, ['idle', 'wave'])
+  assert.equal(generateCalls, 3)
+})
+
 test('a preempted running intent rejects with superseded and the newer wins', async () => {
   let releaseFirst!: () => void
   const firstGate = new Promise<void>(resolve => { releaseFirst = resolve })

@@ -86,6 +86,7 @@ test('a superseded in-flight result is discarded', async () => {
   })
 
   const first = scheduler.solicit({ id: 'first', prompt: 'first' })
+  await Promise.resolve() // let the first generator actually start (in-flight)
   const second = scheduler.solicit({ id: 'second', prompt: 'second' })
   resolveFirst?.(makeMotion(1))
 
@@ -94,6 +95,36 @@ test('a superseded in-flight result is discarded', async () => {
   await assert.rejects(first, /superseded/i)
   assert.equal(scheduler.buffer?.frames.length, 2)
   assert.deepEqual(calls, ['first', 'second'])
+})
+
+test('preempting aborts the previous intent via its cancellation signal', async () => {
+  let firstSignal: AbortSignal | undefined
+  const scheduler = new MotionScheduler({
+    generator: async (intent) => {
+      if (intent.id === 'first') {
+        firstSignal = intent.signal
+        // A cooperative generator honours the signal; it settles only when the
+        // request is aborted (mirrors how MotionGenerationService observes it).
+        return new Promise<CanonicalMotion>((_resolve, reject) => {
+          const onAbort = (): void => reject(new Error('first aborted'))
+          if (intent.signal?.aborted) onAbort()
+          else intent.signal?.addEventListener('abort', onAbort, { once: true })
+        })
+      }
+      return makeMotion(2)
+    },
+  })
+
+  const first = scheduler.solicit({ id: 'first', prompt: 'first' })
+  first.catch(() => { /* expected: preempted via abort */ })
+  await Promise.resolve() // let the first generator start and capture its signal
+  assert.ok(firstSignal, 'first generator should expose its signal')
+
+  const second = scheduler.solicit({ id: 'second', prompt: 'second' })
+  const segment = await second
+  assert.equal(segment.intentId, 'second')
+  assert.equal(firstSignal?.aborted, true)
+  await assert.rejects(first, /superseded|aborted/i)
 })
 
 test('history continuation passes a truncated consumed motion to the next intent', async () => {

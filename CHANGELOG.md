@@ -24,6 +24,16 @@
 
 - `motion.published` 与 `format: canonical` 保持与既有一致的安全边界：URL 必须命中回环令牌化端点，动作体必须通过严格 schema 校验。
 
+### 修复
+
+- Wallpaper 生成动作拉取改用 generation 隔离：`motion.published` 的迟到 fetch 结果不再覆盖已开始播放的更新动作；
+- `MotionScheduler` 抢占由「segmentId 静默丢弃」改为「取消式抢占」：新意图会通过 AbortSignal 真正取消在途生成，并把 request 串行化为单飞后端顺序执行，避免与单请求的 ARDY 服务冲突；
+- `startupGenerate` 逐项续写：上一个完成片段经 `skipToEnd` 作为 history 传给下一意图（此前 history 恒为空）；
+- 生成失败降级而非崩溃：单个 startup 预设失败经 `onError` 记录并继续后续预置，不再使整个 Companion 退出；
+- `generatedTokenMap` 加入 64 条上限并按 FIFO 淘汰，避免长跑内存无上限增长；
+- 移除 `MotionScheduler` 中失效的字段，`superseded` 状态现在真实上报；
+- 补充调度器/控制器测试：真实 signal 抢占、history 续写传参、失败降级继续。
+
 ## [0.5.2-dev] - 2026-08-20
 
 ### 新增

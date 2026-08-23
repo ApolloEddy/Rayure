@@ -31,6 +31,7 @@ const LOOPBACK_HOST = '127.0.0.1' as const
 const DEFAULT_PORT = 32145
 const DEFAULT_HELLO_TIMEOUT_MS = 5_000
 const MAX_ASSET_BYTES = 256 * 1024 * 1024
+const MAX_GENERATED_MOTIONS = 64
 const ASSET_TOKEN_PATTERN = /^[A-Za-z0-9_-]{16,128}$/u
 const ALLOWED_ASSET_EXTENSIONS = new Set([
   '.bmp',
@@ -438,6 +439,13 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
       motionId,
       loop,
     })
+    // Bounded memory: drop the oldest published motions first so a long-running
+    // Companion never leaks once published segments accumulate indefinitely.
+    while (generatedTokenMap.size > MAX_GENERATED_MOTIONS) {
+      const staleToken = generatedTokenMap.keys().next().value
+      if (staleToken === undefined) break
+      generatedTokenMap.delete(staleToken)
+    }
 
     const descriptor: MotionDescriptor = {
       id: motionId,
