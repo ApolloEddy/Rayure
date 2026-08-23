@@ -16,8 +16,9 @@
 - `createMotionSemanticRuntime` 新增 `createGenerationService()`，把缓存优先解析器与 ARDY 后端组合成生成服务；
 - 新增 Wallpaper `canonical-motion-client.test.ts`（加载校验、打断、非法输入）与 Companion `motion-generation-publish.test.ts`（真实子进程 fake bridge 的 generate → publish → 令牌化 URL fetch 端到端）；
 - 新增 renderer 无关的 `MotionScheduler`（Companion）：持有剪辑 Buffer、按真实时间推进并派发帧、以 segmentId 抢占式打断在途生成、并给下一意图续写已消费的历史动作，把离散意图变成连续可打断轨迹；
-- `rayure.local.json` 的 `startupGenerate` 预设现在经由 `MotionScheduler` 逐个发布，首个片段完成后即可提供后续续写能力；
-- 新增 `motion-scheduler.test.ts`（首段、帧推进、抢占打断、迟到结果丢弃、历史续写截断、onSegmentReady）。
+- 新增 `MotionGenerationController`（Companion）：把 Scheduler 与发布副作用组合成运行时入口——`submitIntent()` 供未来的 ASR/LLM 行为层在运行中实时提交动作意图，`runStartup()` 让启动预设与实时意图共享同一套打断/发布语义，并通过注入的发布回调保持可单测；
+- `rayure.local.json` 的 `startupGenerate` 预设现在经由 `MotionScheduler` 逐个发布，首个片段完成后即可提供后续续写能力；未配置 ARDY 后端时不实例化生成控制器；
+- 新增 `motion-scheduler.test.ts`（首段、帧推进、抢占打断、迟到结果丢弃、历史续写截断、onSegmentReady）与 `motion-generation-controller.test.ts`（实时生成转发布、启动预设、抢占、isGenerating）。
 
 ### 变更
 

@@ -5,7 +5,7 @@ import { loadLocalConfig } from './local-config.ts'
 import type { RayureLocalConfig } from './local-config.ts'
 import { createMotionSemanticRuntime } from './motion-semantic-runtime.ts'
 import type { MotionSemanticRuntime } from './motion-semantic-runtime.ts'
-import { MotionScheduler } from './motion-scheduler.ts'
+import { MotionGenerationController } from './motion-generation-controller.ts'
 import { createCompanionServer } from './server.ts'
 import type { CompanionServer } from './server.ts'
 
@@ -54,7 +54,13 @@ async function main(): Promise<void> {
     process.once('SIGINT', () => void shutdown('SIGINT'))
     process.once('SIGTERM', () => void shutdown('SIGTERM'))
 
-    await runStartupGeneration(config, server, motionSemanticRuntime)
+    const controller = createGenerationController(config, server, motionSemanticRuntime)
+    if (controller !== undefined) {
+      await controller.runStartup(config.motionSemantic?.startupGenerate ?? [])
+      // Expose the live entry point so a future ASR/LLM behavior layer can call
+      // submitIntent() at runtime; absent without a configured ARDY backend.
+      ;(globalThis as { rayureMotionGeneration?: MotionGenerationController }).rayureMotionGeneration = controller
+    }
   }
   catch (cause) {
     await motionSemanticRuntime.close()
@@ -72,21 +78,19 @@ function readExplicitConfigPath(): string | undefined {
 }
 
 /**
- * Runs configured startup motion presets, publishing each generated Canonical
- * Motion to connected renderers so the generation -> publish -> play loop is
- * exercised without any UI. Failures are fatal to the process: a configured
- * generation that cannot run should surface at startup, not silently no-op.
+ * Builds the live motion generation controller. It is only constructed when an
+ * ARDY backend is configured (motion semantic generation is available); an
+ * unconfigured process gets no controller and publishes nothing.
  */
-async function runStartupGeneration(
+function createGenerationController(
   config: RayureLocalConfig,
   server: CompanionServer,
   runtime: MotionSemanticRuntime,
-): Promise<void> {
-  const presets = config.motionSemantic?.startupGenerate
-  if (presets === undefined || presets.length === 0) return
+): MotionGenerationController | undefined {
+  if (config.motionSemantic?.ardy === undefined) return undefined
   const service = runtime.createGenerationService()
-  const scheduler = new MotionScheduler({
-    generator: async (intent) => {
+  return new MotionGenerationController({
+    generate: async (intent) => {
       const result = await service.generate({
         cacheKey: intent.id,
         canonicalPrompt: intent.prompt,
@@ -96,21 +100,8 @@ async function runStartupGeneration(
       })
       return result.motion
     },
+    publish: input => server.publishMotion(input),
   })
-  for (const preset of presets) {
-    const segment = await scheduler.solicit({
-      id: preset.id,
-      prompt: preset.prompt,
-      ...(preset.numFrames === undefined ? {} : { numFrames: preset.numFrames }),
-      ...(preset.numDenoisingSteps === undefined ? {} : { numDenoisingSteps: preset.numDenoisingSteps }),
-      ...(preset.cfgWeight === undefined ? {} : { cfgWeight: preset.cfgWeight }),
-    })
-    server.publishMotion({
-      id: segment.intentId,
-      displayName: segment.prompt,
-      motion: segment.motion,
-    })
-  }
 }
 
 main().catch((cause: unknown) => {
