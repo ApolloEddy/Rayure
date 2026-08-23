@@ -2,9 +2,10 @@ import { isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { loadLocalConfig } from './local-config.ts'
-import type { RayureLocalConfig, RayureMotionGeneratePreset } from './local-config.ts'
+import type { RayureLocalConfig } from './local-config.ts'
 import { createMotionSemanticRuntime } from './motion-semantic-runtime.ts'
 import type { MotionSemanticRuntime } from './motion-semantic-runtime.ts'
+import { MotionScheduler } from './motion-scheduler.ts'
 import { createCompanionServer } from './server.ts'
 import type { CompanionServer } from './server.ts'
 
@@ -84,18 +85,30 @@ async function runStartupGeneration(
   const presets = config.motionSemantic?.startupGenerate
   if (presets === undefined || presets.length === 0) return
   const service = runtime.createGenerationService()
+  const scheduler = new MotionScheduler({
+    generator: async (intent) => {
+      const result = await service.generate({
+        cacheKey: intent.id,
+        canonicalPrompt: intent.prompt,
+        numFrames: intent.numFrames ?? 60,
+        numDenoisingSteps: intent.numDenoisingSteps ?? 4,
+        cfgWeight: intent.cfgWeight ?? 2,
+      })
+      return result.motion
+    },
+  })
   for (const preset of presets) {
-    const result = await service.generate({
-      cacheKey: preset.id,
-      canonicalPrompt: preset.prompt,
-      numFrames: preset.numFrames ?? 60,
-      numDenoisingSteps: preset.numDenoisingSteps ?? 4,
-      cfgWeight: preset.cfgWeight ?? 2,
+    const segment = await scheduler.solicit({
+      id: preset.id,
+      prompt: preset.prompt,
+      ...(preset.numFrames === undefined ? {} : { numFrames: preset.numFrames }),
+      ...(preset.numDenoisingSteps === undefined ? {} : { numDenoisingSteps: preset.numDenoisingSteps }),
+      ...(preset.cfgWeight === undefined ? {} : { cfgWeight: preset.cfgWeight }),
     })
     server.publishMotion({
-      id: preset.id,
-      displayName: preset.prompt,
-      motion: result.motion,
+      id: segment.intentId,
+      displayName: segment.prompt,
+      motion: segment.motion,
     })
   }
 }

@@ -14,7 +14,10 @@
 - Wallpaper `CompanionClient` 新增 `onMotionPublished` 回调，`main.ts` 收到 canonical 动作后经令牌化 URL 拉取、校验并交给原生画布播放；
 - Companion `rayure.local.json` 新增 `motionSemantic.startupGenerate` 预设（id/prompt/numFrames/numDenoisingSteps/cfgWeight），启动时经 `MotionGenerationService → publishMotion` 逐个发布，打通“生成 → 发布 → 播放”链路；
 - `createMotionSemanticRuntime` 新增 `createGenerationService()`，把缓存优先解析器与 ARDY 后端组合成生成服务；
-- 新增 Wallpaper `canonical-motion-client.test.ts`（加载校验、打断、非法输入）与 Companion `motion-generation-publish.test.ts`（真实子进程 fake bridge 的 generate → publish → 令牌化 URL fetch 端到端）。
+- 新增 Wallpaper `canonical-motion-client.test.ts`（加载校验、打断、非法输入）与 Companion `motion-generation-publish.test.ts`（真实子进程 fake bridge 的 generate → publish → 令牌化 URL fetch 端到端）；
+- 新增 renderer 无关的 `MotionScheduler`（Companion）：持有剪辑 Buffer、按真实时间推进并派发帧、以 segmentId 抢占式打断在途生成、并给下一意图续写已消费的历史动作，把离散意图变成连续可打断轨迹；
+- `rayure.local.json` 的 `startupGenerate` 预设现在经由 `MotionScheduler` 逐个发布，首个片段完成后即可提供后续续写能力；
+- 新增 `motion-scheduler.test.ts`（首段、帧推进、抢占打断、迟到结果丢弃、历史续写截断、onSegmentReady）。
 
 ### 变更
 
