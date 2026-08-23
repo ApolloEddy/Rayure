@@ -7,6 +7,7 @@ import {
   ProtocolValidationError,
   createClientHello,
   createServerModelAvailable,
+  createServerMotionPublished,
   createServerWelcome,
   parseClientMessage,
   parseServerMessage,
@@ -272,4 +273,70 @@ test('Live2D motion descriptors carry the model3 group and index', () => {
       },
     },
   })), /motion index/i)
+})
+
+test('motion.published carries a tokenized canonical motion descriptor', () => {
+  const published = createServerMotionPublished({
+    id: 'publish-1',
+    motion: {
+      id: 'generated-wave',
+      displayName: 'Generated Wave',
+      format: 'canonical',
+      url: 'http://127.0.0.1:32145/assets/0123456789abcdef/generated-wave.json',
+    },
+  })
+  assert.equal(published.type, 'motion.published')
+  const parsed = parseServerMessage(JSON.stringify(published))
+  assert.equal(parsed.type, 'motion.published')
+  if (parsed.type !== 'motion.published') assert.fail('expected motion.published')
+  assert.deepEqual(parsed.payload.motion, {
+    id: 'generated-wave',
+    displayName: 'Generated Wave',
+    format: 'canonical',
+    url: 'http://127.0.0.1:32145/assets/0123456789abcdef/generated-wave.json',
+  })
+
+  const loopPublished = parseServerMessage(JSON.stringify({
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'motion.published',
+    id: 'publish-loop',
+    payload: {
+      motion: {
+        id: 'generated-loop',
+        displayName: 'Loop',
+        format: 'canonical',
+        url: 'http://127.0.0.1:32145/assets/0123456789abcdef/generated-loop.json',
+        loop: true,
+      },
+    },
+  }))
+  assert.equal(loopPublished.type, 'motion.published')
+
+  // Unsafe URL and unknown format are rejected for published motions too.
+  assert.throws(() => parseServerMessage(JSON.stringify({
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'motion.published',
+    id: 'publish-bad-url',
+    payload: {
+      motion: {
+        id: 'generated-bad',
+        displayName: 'Bad',
+        format: 'canonical',
+        url: 'https://evil.example/generated.json',
+      },
+    },
+  })), ProtocolValidationError)
+  assert.throws(() => parseServerMessage(JSON.stringify({
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'motion.published',
+    id: 'publish-bad-format',
+    payload: {
+      motion: {
+        id: 'generated-bad',
+        displayName: 'Bad',
+        format: 'fbx',
+        url: 'http://127.0.0.1:32145/assets/0123456789abcdef/generated.fbx',
+      },
+    },
+  })), /motion format/)
 })

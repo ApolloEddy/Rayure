@@ -2,6 +2,24 @@
 
 本项目的所有重要变更都会记录在此文件中。
 
+## [0.6.0-dev] - 2026-08-23
+
+### 新增
+
+- 新增 `motion.published` 协议消息，只携带令牌化回环 URL 的 Canonical Motion 描述符，大帧数据不进入 16 KiB Companion WebSocket；
+- 新增 `format: canonical` 的 `MotionDescriptor`，用于标识运行时生成的 `rayure.motion.v1` 动作资源；
+- Companion `createCompanionServer` 新增 `publishMotion()`：校验 Canonical Motion 合同、序列化为内存资源、生成令牌化 `/assets/<token>/<motionId>.json` URL，并向已连接客户端广播 `motion.published`；
+- Wallpaper 新建 `canonical-motion-client.ts`：`loadCanonicalMotion` 只接受回环令牌化 URL 并校验完整动作合同，`CanonicalMotionPlayer` 以同步打断语义将生成动作驱动到参数 sink（generation 隔离、迟到结果释放）；
+- `Live2dNativeDebugSurface` 新增生成动作槽位，运行时动作优先于固定 debug idle fixture 播放，快照暴露 `activeGeneratedMotionId`；
+- Wallpaper `CompanionClient` 新增 `onMotionPublished` 回调，`main.ts` 收到 canonical 动作后经令牌化 URL 拉取、校验并交给原生画布播放；
+- Companion `rayure.local.json` 新增 `motionSemantic.startupGenerate` 预设（id/prompt/numFrames/numDenoisingSteps/cfgWeight），启动时经 `MotionGenerationService → publishMotion` 逐个发布，打通“生成 → 发布 → 播放”链路；
+- `createMotionSemanticRuntime` 新增 `createGenerationService()`，把缓存优先解析器与 ARDY 后端组合成生成服务；
+- 新增 Wallpaper `canonical-motion-client.test.ts`（加载校验、打断、非法输入）与 Companion `motion-generation-publish.test.ts`（真实子进程 fake bridge 的 generate → publish → 令牌化 URL fetch 端到端）。
+
+### 变更
+
+- `motion.published` 与 `format: canonical` 保持与既有一致的安全边界：URL 必须命中回环令牌化端点，动作体必须通过严格 schema 校验。
+
 ## [0.5.2-dev] - 2026-08-20
 
 ### 新增

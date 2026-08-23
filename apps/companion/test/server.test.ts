@@ -9,6 +9,7 @@ import WebSocket from 'ws'
 
 import { PROTOCOL_VERSION, createClientHello, parseServerMessage } from '@rayure/protocol'
 import { createCompanionServer } from '../src/server.ts'
+import { ARDY_CORE_JOINT_NAMES, convertArdyMotion } from '../src/ardy-motion-adapter.ts'
 
 test('server binds only to loopback and completes a correlated handshake', async (t) => {
   const server = createCompanionServer({ port: 0, helloTimeoutMs: 500 })
@@ -326,4 +327,87 @@ test('authorized clients receive motion catalog with tokenized URLs', async (t) 
   const response = await fetch(catalogMessage.payload.motions[0]!.url, { headers: { Origin: 'null' } })
   assert.equal(response.status, 200)
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), vmdBytes)
+})
+
+function makeGeneratedMotion() {
+  const joints = Object.fromEntries(ARDY_CORE_JOINT_NAMES.map((name, index) => [name, {
+    position: [index / 10, 1, 0] as [number, number, number],
+    rotation: [0, 0, 0, 1] as [number, number, number, number],
+  }]))
+  return convertArdyMotion({
+    schema: 'rayure.ardy-motion.v1',
+    backend: 'ardy-core',
+    fps: 20,
+    jointNames: [...ARDY_CORE_JOINT_NAMES],
+    frames: [
+      {
+        timeMs: 0,
+        rootPosition: [0, 0, 0],
+        rootRotation: [0, 0, 0, 1],
+        joints,
+      },
+      {
+        timeMs: 50,
+        rootPosition: [0, 0, 0],
+        rootRotation: [0, 0, 0, 1],
+        joints,
+      },
+    ],
+  })
+}
+
+test('publishMotion announces the descriptor and serves the generated frame memory resource', async (t) => {
+  const server = createCompanionServer({ port: 0, helloTimeoutMs: 1000 })
+  const address = await server.start()
+  t.after(() => server.stop())
+
+  const socket = new WebSocket(`ws://${address.host}:${address.port}/ws`)
+  t.after(() => socket.close())
+  await once(socket, 'open')
+  socket.send(JSON.stringify(createClientHello({ id: 'hello-publish', build: 'test' })))
+  await once(socket, 'message') // welcome
+
+  const published = server.publishMotion({
+    id: 'generated-wave',
+    displayName: 'Generated Wave',
+    motion: makeGeneratedMotion(),
+  })
+  assert.equal(published.id, 'generated-wave')
+  assert.equal(published.format, 'canonical')
+
+  const [publishedData] = await once(socket, 'message')
+  const publishedMessage = parseServerMessage(publishedData!.toString())
+  assert.equal(publishedMessage.type, 'motion.published')
+  if (publishedMessage.type !== 'motion.published') assert.fail('expected motion.published')
+  assert.equal(publishedMessage.payload.motion.url, published.url)
+
+  const response = await fetch(published.url, { headers: { Origin: 'null' } })
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('content-type'), 'application/json')
+  const body = await response.json()
+  assert.deepEqual(body, makeGeneratedMotion())
+
+  // Unknown token and mismatched file name remain forbidden.
+  assert.equal((await fetch(published.url.replace('/assets/', '/assets/wrong-token/'), {
+    headers: { Origin: 'null' },
+  })).status, 404)
+  const wrongPath = new URL('other.json', published.url)
+  assert.equal((await fetch(wrongPath, { headers: { Origin: 'null' } })).status, 404)
+})
+
+test('publishMotion requires a running server and rejects invalid motion ids', async (t) => {
+  const server = createCompanionServer({ port: 0 })
+  assert.throws(() => server.publishMotion({
+    id: 'generated-wave',
+    displayName: 'Bad',
+    motion: makeGeneratedMotion(),
+  }), /running/i)
+
+  await server.start()
+  t.after(() => server.stop())
+  assert.throws(() => server.publishMotion({
+    id: 'bad id!',
+    displayName: 'Bad',
+    motion: makeGeneratedMotion(),
+  }), /identifier/i)
 })

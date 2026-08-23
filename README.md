@@ -19,9 +19,11 @@ Rayure Behavior
        `- 3D Adapter（保留并后续回归）
 ```
 
-`CHANGELOG.md` 已记录到 `0.5.2-dev`（此前的 3D 记录为 0.4.8），但根工作区和各 package manifest 仍标记为 0.2.0。本仓库因此应视为开发快照，而不是已经完成版本统一的正式发布版。
+`CHANGELOG.md` 已记录到 `0.6.0-dev`（此前的 3D 记录为 0.4.8），但根工作区和各 package manifest 仍标记为 0.2.0。本仓库因此应视为开发快照，而不是已经完成版本统一的正式发布版。
 
-当前统一验证中 81 项测试通过，TypeScript 与生产构建均通过；原生 Cubism 画布和 Companion Live2D 模型/动作通道仍仅供本机调试，Core 已具备受控来源和显式失败边界。Wallpaper Engine CEF 已实证本地 bundle、Companion 重连和 Hiyori 令牌资源请求；离线 Core、CEF 视觉/DevTools 与暂停恢复仍未闭合。3D 继续作为冻结回归基线。
+当前统一验证中 121 项测试通过，TypeScript 与生产构建均通过；原生 Cubism 画布和 Companion Live2D 模型/动作通道仍仅供本机调试，Core 已具备受控来源和显式失败边界。Wallpaper Engine CEF 已实证本地 bundle、Companion 重连和 Hiyori 令牌资源请求；离线 Core、CEF 视觉/DevTools 与暂停恢复仍未闭合。3D 继续作为冻结回归基线。
+
+选择 ARDY 后，仓库内的动作生成链路（Prompt → 语义特征 → ARDY Bridge → Canonical Motion → 令牌化 `motion.published` → Wallpaper 拉取校验并驱动参数 sink）已由 I/O 边界与端到端测试打通：Companion 的 `publishMotion` 会把生成动作以 `/assets/<token>/<motionId>.json` 提供并广播描述符，Wallpaper 收到后经 `loadCanonicalMotion` 校验再交给 `CanonicalMotionPlayer` 播放。仍待接的是真实 ARDY 权重/Bridge 与 AutoDL 预置特征，以及真实模型画布上的浏览器端到端验收。
 
 ## 已实现
 

@@ -84,7 +84,16 @@ export interface Live2dMotionDescriptor extends MotionDescriptorBase {
   index: number
 }
 
-export type MotionDescriptor = VmdMotionDescriptor | Live2dMotionDescriptor
+/**
+ * A tokenized reference to a generated `rayure.motion.v1` (Canonical Motion).
+ * The large frame data is never put on the 16 KiB Companion websocket; it is
+ * served by the loopback asset gateway and only its descriptor is published.
+ */
+export interface CanonicalMotionDescriptor extends MotionDescriptorBase {
+  format: 'canonical'
+}
+
+export type MotionDescriptor = VmdMotionDescriptor | Live2dMotionDescriptor | CanonicalMotionDescriptor
 
 export interface ServerMotionPlayMessage {
   protocolVersion: typeof PROTOCOL_VERSION
@@ -133,6 +142,15 @@ export interface ServerMotionCatalogMessage {
   }
 }
 
+export interface ServerMotionPublishedMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'motion.published'
+  id: string
+  payload: {
+    motion: MotionDescriptor
+  }
+}
+
 export interface ServerEmotePlayMessage {
   protocolVersion: typeof PROTOCOL_VERSION
   type: 'emote.play'
@@ -152,6 +170,7 @@ export type ServerMessage =
   | ServerErrorMessage
   | ServerModelAvailableMessage
   | ServerMotionCatalogMessage
+  | ServerMotionPublishedMessage
   | ServerMotionPlayMessage
   | ServerMotionStopMessage
   | ServerExpressionSetMessage
@@ -312,6 +331,20 @@ export function createServerMotionCatalog(input: {
     id: requireIdentifier(input.id, 'id'),
     payload: {
       motions: input.motions.map(requireMotionDescriptor),
+    },
+  }
+}
+
+export function createServerMotionPublished(input: {
+  id: string
+  motion: MotionDescriptor
+}): ServerMotionPublishedMessage {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'motion.published',
+    id: requireIdentifier(input.id, 'id'),
+    payload: {
+      motion: requireMotionDescriptor(input.motion),
     },
   }
 }
@@ -483,6 +516,16 @@ export function parseServerMessage(raw: string): ServerMessage {
     return createServerMotionCatalog({
       id: requireIdentifier(value.id, 'id'),
       motions: payload.motions.map(requireMotionDescriptor),
+    })
+  }
+
+  if (value.type === 'motion.published') {
+    requireExactKeys(value, ['protocolVersion', 'type', 'id', 'payload'], 'motion published')
+    const payload = requireRecord(value.payload, 'motion published payload')
+    requireExactKeys(payload, ['motion'], 'motion published payload')
+    return createServerMotionPublished({
+      id: requireIdentifier(value.id, 'id'),
+      motion: requireMotionDescriptor(payload.motion),
     })
   }
 
@@ -687,7 +730,24 @@ function requireMotionDescriptor(value: unknown): MotionDescriptor {
     }
   }
 
-  throw new ProtocolValidationError('motion format must be vmd or live2d')
+  if (motion.format === 'canonical') {
+    if (motion.loop !== undefined) {
+      requireExactKeys(motion, ['id', 'displayName', 'format', 'url', 'loop'], 'canonical motion descriptor')
+      if (typeof motion.loop !== 'boolean') throw new ProtocolValidationError('motion loop must be boolean')
+    }
+    else {
+      requireExactKeys(motion, ['id', 'displayName', 'format', 'url'], 'canonical motion descriptor')
+    }
+    return {
+      id: requireIdentifier(motion.id, 'motion id'),
+      displayName: requireDisplayString(motion.displayName, 'motion displayName', 96),
+      format: 'canonical',
+      url: requireLoopbackAssetUrl(motion.url),
+      ...(motion.loop !== undefined ? { loop: motion.loop } : {}),
+    }
+  }
+
+  throw new ProtocolValidationError('motion format must be vmd, live2d or canonical')
 }
 
 function requireWeight(value: unknown): number {

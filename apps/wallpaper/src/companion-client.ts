@@ -31,6 +31,7 @@ export interface CompanionClientOptions {
   onStatus?: (snapshot: CompanionConnectionSnapshot) => void
   onModelAvailable?: (model: ModelDescriptor) => void
   onMotionCatalog?: (motions: readonly MotionDescriptor[]) => void
+  onMotionPublished?: (motion: MotionDescriptor) => void
   onMotionPlay?: (motion: MotionDescriptor) => void
   onMotionStop?: (motionId?: string) => void
   onExpressionSet?: (payload: ServerExpressionSetMessage['payload']) => void
@@ -49,6 +50,7 @@ export class CompanionClient {
   readonly #createId: () => string
   readonly #onModelAvailable: ((model: ModelDescriptor) => void) | undefined
   readonly #onMotionCatalog: ((motions: readonly MotionDescriptor[]) => void) | undefined
+  readonly #onMotionPublished: ((motion: MotionDescriptor) => void) | undefined
   readonly #onMotionPlay: ((motion: MotionDescriptor) => void) | undefined
   readonly #onMotionStop: ((motionId?: string) => void) | undefined
   readonly #onExpressionSet: ((payload: ServerExpressionSetMessage['payload']) => void) | undefined
@@ -71,6 +73,7 @@ export class CompanionClient {
     this.#createId = options.createId ?? createWireId
     this.#onModelAvailable = options.onModelAvailable
     this.#onMotionCatalog = options.onMotionCatalog
+    this.#onMotionPublished = options.onMotionPublished
     this.#onMotionPlay = options.onMotionPlay
     this.#onMotionStop = options.onMotionStop
     this.#onExpressionSet = options.onExpressionSet
@@ -191,6 +194,17 @@ export class CompanionClient {
           if (!welcomed) throw new Error('Companion announced motion catalog before completing the handshake')
           try {
             this.#onMotionCatalog?.(message.payload.motions)
+          }
+          catch {
+            // Transport lifecycle isolation.
+          }
+          return
+        }
+
+        if (message.type === 'motion.published') {
+          if (!welcomed) throw new Error('Companion published motion before completing the handshake')
+          try {
+            this.#onMotionPublished?.(message.payload.motion)
           }
           catch {
             // Transport lifecycle isolation.

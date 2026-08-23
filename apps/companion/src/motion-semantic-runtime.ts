@@ -6,12 +6,14 @@ import {
 import type { RayureMotionSemanticConfig } from './local-config.ts'
 import { TextEncoderApiClient } from './text-encoder-client.ts'
 import { ArdyProcessClient } from './ardy-process-client.ts'
+import { MotionGenerationService } from './motion-generation-service.ts'
 
 export interface MotionSemanticRuntime {
   readonly cache: MemoryMotionSemanticFeatureCache
   readonly resolver: CachedMotionSemanticFeatureResolver | undefined
   readonly cachePath: string | undefined
   readonly ardy: ArdyProcessClient | undefined
+  createGenerationService(): MotionGenerationService
   persist(): Promise<void>
   close(): Promise<void>
 }
@@ -55,11 +57,22 @@ export async function createMotionSemanticRuntime(
       ...(config.ardy.cwd === undefined ? {} : { cwd: config.ardy.cwd }),
     })
 
+  const createGenerationService = (): MotionGenerationService => {
+    if (ardy === undefined) {
+      throw new Error('Motion generation requires an ARDY backend')
+    }
+    return new MotionGenerationService({
+      cache,
+      ...(resolver === undefined ? {} : { resolver }),
+      backend: ardy,
+    })
+  }
+
   const close = async (): Promise<void> => {
     await ardy?.close()
   }
 
-  return { cache, resolver, cachePath, ardy, persist, close }
+  return { cache, resolver, cachePath, ardy, createGenerationService, persist, close }
 }
 
 async function readInitialFeatures(filePath: string) {

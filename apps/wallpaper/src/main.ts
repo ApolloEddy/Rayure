@@ -1,7 +1,8 @@
 import './style.css'
 
-import type { Live2dMotionDescriptor, ModelDescriptor } from '@rayure/protocol'
+import type { Live2dMotionDescriptor, ModelDescriptor, MotionDescriptor } from '@rayure/protocol'
 import { CompanionClient } from './companion-client.ts'
+import { loadCanonicalMotion } from './live2d/canonical-motion-client.ts'
 import type { CompanionConnectionSnapshot } from './companion-client.ts'
 import {
   DEFAULT_WALLPAPER_SETTINGS,
@@ -78,6 +79,9 @@ const companion = new CompanionClient({
     live2dCompanionSurface?.updateMotionCatalog(motions)
     scene.updateMotionCatalog(motions.filter(motion => motion.format === 'vmd'))
     renderLive2dMotionToolbar(live2dCompanionMotionCatalog)
+  },
+  onMotionPublished: (motion) => {
+    void handleMotionPublished(motion)
   },
   onEmotePlay: (payload) => {
     if (live2dCompanionModel?.format === 'live2d') {
@@ -221,6 +225,24 @@ function requestLive2dMotion(motion: Live2dMotionDescriptor): void {
   }
   pendingLive2dMotion = undefined
   void live2dCompanionSurface.playMotion(motion)
+}
+
+/**
+ * Handles a generated Canonical Motion announced by Companion. Only the
+ * canonical format is consumed here; it is fetched over the tokenized loopback
+ * gateway, validated, and played on the native surface as a runtime motion.
+ * Failures surface silently to the debug status; a healthy renderer skips them.
+ */
+async function handleMotionPublished(motion: MotionDescriptor): Promise<void> {
+  if (motion.format !== 'canonical' || live2dCompanionModel?.format !== 'live2d') return
+  if (!live2dCompanionSurface?.isReady) return
+  try {
+    const canonical = await loadCanonicalMotion(motion.url)
+    live2dCompanionSurface.playGeneratedMotion(canonical, motion)
+  }
+  catch {
+    live2dCompanionSurface.stopGeneratedMotion()
+  }
 }
 
 function renderConnectionStatus(snapshot: CompanionConnectionSnapshot): void {

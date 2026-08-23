@@ -2,8 +2,11 @@ import { isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { loadLocalConfig } from './local-config.ts'
+import type { RayureLocalConfig, RayureMotionGeneratePreset } from './local-config.ts'
 import { createMotionSemanticRuntime } from './motion-semantic-runtime.ts'
+import type { MotionSemanticRuntime } from './motion-semantic-runtime.ts'
 import { createCompanionServer } from './server.ts'
+import type { CompanionServer } from './server.ts'
 
 const DEFAULT_PORT = 32145
 
@@ -49,6 +52,8 @@ async function main(): Promise<void> {
 
     process.once('SIGINT', () => void shutdown('SIGINT'))
     process.once('SIGTERM', () => void shutdown('SIGTERM'))
+
+    await runStartupGeneration(config, server, motionSemanticRuntime)
   }
   catch (cause) {
     await motionSemanticRuntime.close()
@@ -63,6 +68,36 @@ function readExplicitConfigPath(): string | undefined {
     throw new Error('RAYURE_LOCAL_CONFIG must be an absolute path without surrounding whitespace')
   }
   return raw
+}
+
+/**
+ * Runs configured startup motion presets, publishing each generated Canonical
+ * Motion to connected renderers so the generation -> publish -> play loop is
+ * exercised without any UI. Failures are fatal to the process: a configured
+ * generation that cannot run should surface at startup, not silently no-op.
+ */
+async function runStartupGeneration(
+  config: RayureLocalConfig,
+  server: CompanionServer,
+  runtime: MotionSemanticRuntime,
+): Promise<void> {
+  const presets = config.motionSemantic?.startupGenerate
+  if (presets === undefined || presets.length === 0) return
+  const service = runtime.createGenerationService()
+  for (const preset of presets) {
+    const result = await service.generate({
+      cacheKey: preset.id,
+      canonicalPrompt: preset.prompt,
+      numFrames: preset.numFrames ?? 60,
+      numDenoisingSteps: preset.numDenoisingSteps ?? 4,
+      cfgWeight: preset.cfgWeight ?? 2,
+    })
+    server.publishMotion({
+      id: preset.id,
+      displayName: preset.prompt,
+      motion: result.motion,
+    })
+  }
 }
 
 main().catch((cause: unknown) => {

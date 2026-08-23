@@ -1,13 +1,15 @@
 import {
   createLive2dDebugMotion,
 } from './debug-probe.ts'
-import type { Live2dMotionDescriptor, MotionDescriptor } from '@rayure/protocol'
+import type { CanonicalMotion, Live2dMotionDescriptor, MotionDescriptor } from '@rayure/protocol'
 import {
   DEFAULT_LIVE2D_CORE_URL,
   resolveLive2dCoreUrl,
 } from './core-source.ts'
 import { parseLive2dModel3 } from './model-manifest.ts'
+import { CanonicalMotionPlayer } from './canonical-motion-client.ts'
 import { Live2dMotionController } from './motion-controller.ts'
+import type { Live2dMotionModelLike } from './motion-controller.ts'
 import { Live2dMotionPlayer } from './motion-player.ts'
 import type { Live2dParameterSink } from './rig-profile.ts'
 
@@ -40,6 +42,7 @@ export interface Live2dNativeDebugSnapshot {
   parameterIds: readonly string[]
   parameters: Readonly<Record<string, number>>
   activeMotionId?: string
+  activeGeneratedMotionId?: string
   detail?: string
 }
 
@@ -65,6 +68,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
   #model: NativeLive2dModel | undefined
   #modelReady = false
   #player: Live2dMotionPlayer | undefined
+  #generatedMotion: CanonicalMotionPlayer | undefined
   #animationFrame: number | undefined
   #resizeObserver: ResizeObserver | undefined
   #lastRenderedAt = 0
@@ -136,6 +140,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
       this.#player = new Live2dMotionPlayer(this)
       this.#player.bind(this.#motion)
       this.#player.advance(0)
+      this.#generatedMotion = new CanonicalMotionPlayer(this)
       window.addEventListener('resize', this.#resize, { passive: true })
       this.#lastRenderedAt = performance.now()
       this.#animationFrame = requestAnimationFrame(this.#render)
@@ -192,6 +197,21 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
     this.#nativeMotion.stopMotion(motionId)
   }
 
+  /**
+   * Plays a runtime-generated Canonical Motion fetched from the tokenized
+   * loopback URL described by a `motion.published` message. Generated frames
+   * take the active slot over the fixed debug idle fixture but do not touch
+   * the native `motion3` queue.
+   */
+  playGeneratedMotion(motion: CanonicalMotion, descriptor: MotionDescriptor): boolean {
+    if (this.#disposed || !this.#generatedMotion) return false
+    return this.#generatedMotion.play(motion, descriptor)
+  }
+
+  stopGeneratedMotion(): void {
+    this.#generatedMotion?.stop()
+  }
+
   snapshot(): Live2dNativeDebugSnapshot {
     return this.#snapshot()
   }
@@ -208,6 +228,8 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
     this.#nativeMotion.dispose()
     this.#player?.dispose()
     this.#player = undefined
+    this.#generatedMotion?.dispose()
+    this.#generatedMotion = undefined
     try {
       this.#model?.destroy()
     }
@@ -225,8 +247,13 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
     this.#animationFrame = requestAnimationFrame(this.#render)
     const deltaSeconds = Math.min(Math.max(0, timestamp - this.#lastRenderedAt) / 1000, 0.1)
     this.#lastRenderedAt = timestamp
-    if (!this.#player.isPlaying) this.#player.bind(this.#motion)
-    this.#player.advance(deltaSeconds)
+    if (this.#generatedMotion?.isPlaying === true) {
+      this.#generatedMotion.advance(deltaSeconds)
+    }
+    else {
+      if (!this.#player.isPlaying) this.#player.bind(this.#motion)
+      this.#player.advance(deltaSeconds)
+    }
     this.#model.update()
     if (timestamp - this.#lastSnapshotAt >= 100) {
       this.#lastSnapshotAt = timestamp
@@ -256,6 +283,9 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
       parameterIds: this.#parameterIds,
       parameters,
       ...(this.#nativeMotion.activeMotionId === undefined ? {} : { activeMotionId: this.#nativeMotion.activeMotionId }),
+      ...(this.#generatedMotion?.activeDescriptor === undefined
+        ? {}
+        : { activeGeneratedMotionId: this.#generatedMotion.activeDescriptor.id }),
     }
   }
 

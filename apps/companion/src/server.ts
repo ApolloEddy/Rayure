@@ -13,11 +13,13 @@ import {
   createServerError,
   createServerModelAvailable,
   createServerMotionCatalog,
+  createServerMotionPublished,
   createServerWelcome,
   parseClientMessage,
   serializeWireMessage,
+  validateCanonicalMotion,
 } from '@rayure/protocol'
-import type { Live2dMotionDescriptor, MotionDescriptor } from '@rayure/protocol'
+import type { CanonicalMotion, Live2dMotionDescriptor, MotionDescriptor } from '@rayure/protocol'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { RawData } from 'ws'
 
@@ -74,12 +76,34 @@ export interface CompanionServer {
   start(): Promise<CompanionServerAddress>
   stop(): Promise<void>
   snapshot(): CompanionServerSnapshot
+  /**
+   * Publishes a generated Canonical Motion as a tokenized memory resource so
+   * the renderer can fetch the large frame data over the loopback asset
+   * gateway instead of the 16 KiB websocket. Returns the descriptor the
+   * renderer should consume once it is announced via `motion.published`.
+   */
+  publishMotion(input: {
+    id: string
+    displayName: string
+    motion: CanonicalMotion
+    loop?: boolean
+  }): MotionDescriptor
 }
 
 interface PreparedAsset {
   rootPath: string
   entryFileName: string
   assetToken: string
+}
+
+interface PreparedGeneratedMotion {
+  kind: 'generated'
+  assetToken: string
+  entryFileName: string
+  content: Buffer
+  displayName: string
+  motionId: string
+  loop: boolean
 }
 
 interface PreparedModel extends PreparedAsset {
@@ -106,6 +130,7 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
   let preparedModel: PreparedModel | undefined
   let preparedMotions: readonly PreparedMotion[] = []
   const assetTokenMap = new Map<string, PreparedAsset>()
+  const generatedTokenMap = new Map<string, PreparedGeneratedMotion>()
   let startPromise: Promise<CompanionServerAddress> | undefined
   let stopPromise: Promise<void> | undefined
   const welcomedClients = new Set<WebSocket>()
@@ -131,6 +156,7 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
     let nextWebSocketServer: WebSocketServer | undefined
     try {
       assetTokenMap.clear()
+      generatedTokenMap.clear()
       preparedModel = options.model === undefined
         ? undefined
         : await prepareModel(options.model, createAssetToken())
@@ -152,7 +178,7 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
       }
 
       const createdHttpServer = createServer((request, response) => {
-        void handleHttpRequest(request, response, assetTokenMap)
+        void handleHttpRequest(request, response, assetTokenMap, generatedTokenMap)
       })
       const createdWebSocketServer = new WebSocketServer({
         noServer: true,
@@ -186,6 +212,7 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
       preparedModel = undefined
       preparedMotions = []
       assetTokenMap.clear()
+      generatedTokenMap.clear()
       webSocketServer = undefined
       httpServer = undefined
       await cleanupFailedStart(nextHttpServer, nextWebSocketServer)
@@ -375,8 +402,69 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
       address = undefined
       preparedModel = undefined
       welcomedClients.clear()
+      assetTokenMap.clear()
+      generatedTokenMap.clear()
       stopPromise = undefined
     }
+  }
+
+  function publishMotion(input: {
+    id: string
+    displayName: string
+    motion: CanonicalMotion
+    loop?: boolean
+  }): MotionDescriptor {
+    if (phase !== 'running' || address === undefined) {
+      throw new Error('Companion must be running before publishing a generated motion')
+    }
+    const motionId = requireMotionId(input.id)
+    const displayName = requireDisplayName(input.displayName, 'generated motion displayName', 96)
+    validateCanonicalMotion(input.motion)
+    const content = Buffer.from(JSON.stringify(input.motion), 'utf8')
+    const loop = input.loop ?? false
+    if (typeof loop !== 'boolean') throw new Error('generated motion loop must be boolean')
+
+    const assetToken = createAssetToken()
+    if (!ASSET_TOKEN_PATTERN.test(assetToken)) {
+      throw new Error('Asset token must contain 16-128 URL-safe characters')
+    }
+    const entryFileName = `${motionId}.json`
+    generatedTokenMap.set(assetToken, {
+      kind: 'generated',
+      assetToken,
+      entryFileName,
+      content,
+      displayName,
+      motionId,
+      loop,
+    })
+
+    const descriptor: MotionDescriptor = {
+      id: motionId,
+      displayName,
+      format: 'canonical',
+      url: createGeneratedMotionUrl(address, {
+        assetToken,
+        entryFileName,
+      }),
+      ...(loop ? { loop } : {}),
+    }
+
+    const serialized = serializeWireMessage(createServerMotionPublished({
+      id: createId(),
+      motion: descriptor,
+    }))
+    for (const socket of welcomedClients) {
+      if (socket.readyState === WebSocket.OPEN) {
+        try {
+          socket.send(serialized)
+        }
+        catch {
+          // A single lagging client must not drop the published motion.
+        }
+      }
+    }
+    return descriptor
   }
 
   function snapshot(): CompanionServerSnapshot {
@@ -389,7 +477,7 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
     }
   }
 
-  return { start, stop, snapshot }
+  return { start, stop, snapshot, publishMotion }
 }
 
 async function prepareModel(source: CompanionModelSource, assetToken: string): Promise<PreparedModel> {
@@ -439,6 +527,7 @@ async function handleHttpRequest(
   request: IncomingMessage,
   response: ServerResponse,
   assets: Map<string, PreparedAsset>,
+  generated: Map<string, PreparedGeneratedMotion>,
 ): Promise<void> {
   try {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -464,17 +553,24 @@ async function handleHttpRequest(
     }
 
     const token = match[1]!
+    const segments = decodeAssetSegments(match[2]!)
+    if (!segments) {
+      respond(response, 400, 'Bad Request')
+      return
+    }
+
+    const generatedMotion = generated.get(token)
+    if (generatedMotion !== undefined) {
+      serveGeneratedMotion(response, request.method, generatedMotion, segments, request.headers.origin)
+      return
+    }
+
     const asset = assets.get(token)
     if (!asset) {
       respond(response, 404, 'Not Found')
       return
     }
 
-    const segments = decodeAssetSegments(match[2]!)
-    if (!segments) {
-      respond(response, 400, 'Bad Request')
-      return
-    }
     const extension = extname(segments.at(-1) ?? '').toLowerCase()
     if (!ALLOWED_ASSET_EXTENSIONS.has(extension)) {
       respond(response, 403, 'Forbidden')
@@ -525,6 +621,30 @@ async function handleHttpRequest(
     if (!response.headersSent) respond(response, 500, 'Internal Server Error')
     else response.destroy()
   }
+}
+
+function serveGeneratedMotion(
+  response: ServerResponse,
+  method: string,
+  motion: PreparedGeneratedMotion,
+  segments: readonly string[],
+  origin: string | undefined,
+): void {
+  if (segments.length !== 1 || segments[0] !== motion.entryFileName) {
+    respond(response, 404, 'Not Found')
+    return
+  }
+  if (motion.content.byteLength > MAX_ASSET_BYTES) {
+    respond(response, 413, 'Content Too Large')
+    return
+  }
+  applyAssetHeaders(response, origin, '.json', motion.content.byteLength)
+  response.statusCode = 200
+  if (method === 'HEAD') {
+    response.end()
+    return
+  }
+  response.end(motion.content)
 }
 
 function applyAssetHeaders(
@@ -592,6 +712,13 @@ function isAllowedBrowserOrigin(origin: string | undefined): boolean {
 function createAssetUrl(address: CompanionServerAddress, asset: PreparedAsset): string {
   const encodedEntry = asset.entryFileName.split(/[\\/]/u).map(encodeURIComponent).join('/')
   return `http://${address.host}:${address.port}/assets/${asset.assetToken}/${encodedEntry}`
+}
+
+function createGeneratedMotionUrl(
+  address: CompanionServerAddress,
+  motion: Pick<PreparedGeneratedMotion, 'assetToken' | 'entryFileName'>,
+): string {
+  return `http://${address.host}:${address.port}/assets/${motion.assetToken}/${encodeURIComponent(motion.entryFileName)}`
 }
 
 function createAssetUrlForPath(
@@ -730,6 +857,26 @@ function requirePort(value: number): number {
 function requireHelloTimeout(value: number): number {
   if (!Number.isFinite(value) || value < 10 || value > 60_000) {
     throw new Error('helloTimeoutMs must be between 10 and 60000')
+  }
+  return value
+}
+
+function requireMotionId(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9._:-]{1,64}$/u.test(value)) {
+    throw new Error('generated motion id must be a 1-64 character identifier')
+  }
+  return value
+}
+
+function requireDisplayName(value: unknown, name: string, maximumLength: number): string {
+  if (
+    typeof value !== 'string'
+    || value.length < 1
+    || value.length > maximumLength
+    || value.trim() !== value
+    || /[\u0000-\u001F\u007F]/u.test(value)
+  ) {
+    throw new Error(`${name} must be a trimmed printable string up to ${maximumLength} characters`)
   }
   return value
 }

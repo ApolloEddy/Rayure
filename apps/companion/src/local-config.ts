@@ -35,6 +35,15 @@ export interface RayureMotionSemanticConfig {
     cwd?: string | undefined
     requestTimeoutMs: number
   } | undefined
+  startupGenerate?: readonly RayureMotionGeneratePreset[] | undefined
+}
+
+export interface RayureMotionGeneratePreset {
+  id: string
+  prompt: string
+  numFrames?: number | undefined
+  numDenoisingSteps?: number | undefined
+  cfgWeight?: number | undefined
 }
 
 export interface LoadLocalConfigOptions {
@@ -151,6 +160,7 @@ function resolveMotionSemanticConfig(value: unknown): RayureMotionSemanticConfig
   if (root.cachePath !== undefined) allowedKeys.push('cachePath')
   if (root.textEncoder !== undefined) allowedKeys.push('textEncoder')
   if (root.ardy !== undefined) allowedKeys.push('ardy')
+  if (root.startupGenerate !== undefined) allowedKeys.push('startupGenerate')
   requireExactKeys(root, allowedKeys, 'motionSemantic config')
   if (allowedKeys.length === 0) throw new Error('motionSemantic config must define cachePath or textEncoder')
 
@@ -172,11 +182,41 @@ function resolveMotionSemanticConfig(value: unknown): RayureMotionSemanticConfig
   let ardy: RayureMotionSemanticConfig['ardy']
   if (root.ardy !== undefined) ardy = resolveArdyConfig(root.ardy)
 
+  let startupGenerate: RayureMotionSemanticConfig['startupGenerate']
+  if (root.startupGenerate !== undefined) {
+    if (ardy === undefined) throw new Error('motionSemantic startupGenerate requires a configured ardy backend')
+    startupGenerate = resolveStartupGenerate(root.startupGenerate)
+  }
+
   return {
     ...(cachePath === undefined ? {} : { cachePath }),
     ...(textEncoder === undefined ? {} : { textEncoder }),
     ...(ardy === undefined ? {} : { ardy }),
+    ...(startupGenerate === undefined ? {} : { startupGenerate }),
   }
+}
+
+function resolveStartupGenerate(value: unknown): readonly RayureMotionGeneratePreset[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 32) {
+    throw new Error('motionSemantic startupGenerate must be a non-empty array up to 32 presets')
+  }
+  return value.map((item, index) => {
+    const preset = requireRecord(item, `motionSemantic startupGenerate[${index}]`)
+    const presetKeys = ['id', 'prompt']
+    if (preset.numFrames !== undefined) presetKeys.push('numFrames')
+    if (preset.numDenoisingSteps !== undefined) presetKeys.push('numDenoisingSteps')
+    if (preset.cfgWeight !== undefined) presetKeys.push('cfgWeight')
+    requireExactKeys(preset, presetKeys, `motionSemantic startupGenerate[${index}]`)
+    const id = requireIdentifier(preset.id)
+    const prompt = requirePrompt(preset.prompt)
+    return {
+      id,
+      prompt,
+      ...(preset.numFrames === undefined ? {} : { numFrames: requireGenerateInteger(preset.numFrames, `startupGenerate[${index}] numFrames`, 1, 600) }),
+      ...(preset.numDenoisingSteps === undefined ? {} : { numDenoisingSteps: requireGenerateInteger(preset.numDenoisingSteps, `startupGenerate[${index}] numDenoisingSteps`, 1, 20) }),
+      ...(preset.cfgWeight === undefined ? {} : { cfgWeight: requireGenerateNumber(preset.cfgWeight, `startupGenerate[${index}] cfgWeight`, 0, 20) }),
+    }
+  })
 }
 
 function resolveArdyConfig(value: unknown): NonNullable<RayureMotionSemanticConfig['ardy']> {
@@ -226,6 +266,19 @@ function requireDisplayName(value: unknown): string {
     || /[\u0000-\u001F\u007F]/u.test(value)
   ) {
     throw new Error('Configured model displayName must be a trimmed printable string up to 96 characters')
+  }
+  return value
+}
+
+function requirePrompt(value: unknown): string {
+  if (
+    typeof value !== 'string'
+    || value.length < 1
+    || value.length > 512
+    || value.trim() !== value
+    || /[\u0000-\u001F\u007F]/u.test(value)
+  ) {
+    throw new Error('Configured startupGenerate prompt must be a trimmed printable string up to 512 characters')
   }
   return value
 }
@@ -286,6 +339,20 @@ function requireAbsoluteFeatureCachePath(value: unknown): string {
   }
   if (extname(value).toLowerCase() !== '.json') {
     throw new Error('Configured motion semantic cachePath must reference a JSON cache file')
+  }
+  return value
+}
+
+function requireGenerateInteger(value: unknown, name: string, minimum: number, maximum: number): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`Configured ${name} must be an integer from ${minimum} through ${maximum}`)
+  }
+  return value
+}
+
+function requireGenerateNumber(value: unknown, name: string, minimum: number, maximum: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum || value > maximum) {
+    throw new Error(`Configured ${name} must be a finite number from ${minimum} through ${maximum}`)
   }
   return value
 }

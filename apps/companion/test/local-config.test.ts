@@ -113,3 +113,61 @@ test('local config resolves configured motions and rejects invalid motion paths'
   }))
   await assert.rejects(loadLocalConfig(configPath), /format|vmd/i)
 })
+
+test('local config parses startup generate presets and requires an ardy backend', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'rayure-config-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const configPath = join(root, 'rayure.local.json')
+
+  // Missing ardy is rejected when startupGenerate is present.
+  await writeFile(configPath, JSON.stringify({
+    motionSemantic: {
+      startupGenerate: [{ id: 'wave.casual', prompt: 'casually wave' }],
+    },
+  }))
+  await assert.rejects(loadLocalConfig(configPath), /ardy/i)
+
+  await writeFile(configPath, JSON.stringify({
+    motionSemantic: {
+      startupGenerate: [
+        { id: 'wave.casual', prompt: 'casually wave', numFrames: 40, numDenoisingSteps: 2, cfgWeight: 1.5 },
+        { id: 'scratch.head', prompt: 'awkwardly scratch head' },
+      ],
+      ardy: {
+        command: 'node',
+        args: ['ardy-bridge.mjs'],
+      },
+    },
+  }))
+  const config = await loadLocalConfig(configPath)
+  assert.equal(config.motionSemantic?.startupGenerate?.length, 2)
+  assert.deepEqual(config.motionSemantic?.startupGenerate?.[0], {
+    id: 'wave.casual',
+    prompt: 'casually wave',
+    numFrames: 40,
+    numDenoisingSteps: 2,
+    cfgWeight: 1.5,
+  })
+  assert.deepEqual(config.motionSemantic?.startupGenerate?.[1], {
+    id: 'scratch.head',
+    prompt: 'awkwardly scratch head',
+  })
+
+  // Invalid preset fields are rejected.
+  for (const bad of [
+    [],
+    [{ id: 'bad id', prompt: 'x' }],
+    [{ id: 'x', prompt: 'x', numFrames: 0 }],
+    [{ id: 'x', prompt: 'x', numDenoisingSteps: 99 }],
+    [{ id: 'x', prompt: 'x', cfgWeight: -1 }],
+    [{ id: 'x', prompt: 'x', extra: true }],
+  ]) {
+    await writeFile(configPath, JSON.stringify({
+      motionSemantic: {
+        startupGenerate: bad,
+        ardy: { command: 'node', args: ['ardy-bridge.mjs'] },
+      },
+    }))
+    await assert.rejects(loadLocalConfig(configPath), /startupGenerate|array|identifier|integer|finite|fields/i)
+  }
+})
