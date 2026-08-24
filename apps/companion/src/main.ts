@@ -6,6 +6,7 @@ import type { RayureLocalConfig } from './local-config.ts'
 import { createMotionSemanticRuntime } from './motion-semantic-runtime.ts'
 import type { MotionSemanticRuntime } from './motion-semantic-runtime.ts'
 import { MotionGenerationController } from './motion-generation-controller.ts'
+import { SceneEntityRegistry } from './scene-entity-registry.ts'
 import { createCompanionServer } from './server.ts'
 import type { CompanionServer } from './server.ts'
 
@@ -27,10 +28,22 @@ async function main(): Promise<void> {
   const configPath = explicitConfigPath ?? fileURLToPath(new URL('../../../rayure.local.json', import.meta.url))
   const config = await loadLocalConfig(configPath, { optional: explicitConfigPath === undefined })
   const motionSemanticRuntime = await createMotionSemanticRuntime(config.motionSemantic)
+  const sceneEntities = new SceneEntityRegistry({
+    ...(config.motionSemantic?.scene?.entities === undefined
+      ? {}
+      : { entities: config.motionSemantic.scene.entities }),
+    ...(config.motionSemantic?.scene?.transform === undefined
+      ? {}
+      : { transform: config.motionSemantic.scene.transform }),
+  })
+  let controller: MotionGenerationController | undefined
   const server = createCompanionServer({
     port: readPort(),
     ...(config.model === undefined ? {} : { model: config.model }),
     ...(config.motions === undefined ? {} : { motions: config.motions }),
+    onMotionPlayback: observation => {
+      controller?.reportPlayback(observation)
+    },
   })
   try {
     const address = await server.start()
@@ -54,12 +67,13 @@ async function main(): Promise<void> {
     process.once('SIGINT', () => void shutdown('SIGINT'))
     process.once('SIGTERM', () => void shutdown('SIGTERM'))
 
-    const controller = createGenerationController(config, server, motionSemanticRuntime)
+    controller = createGenerationController(config, server, motionSemanticRuntime, sceneEntities)
     if (controller !== undefined) {
       await controller.runStartup(config.motionSemantic?.startupGenerate ?? [])
       // Expose the live entry point so a future ASR/LLM behavior layer can call
       // submitIntent() at runtime; absent without a configured ARDY backend.
       ;(globalThis as { rayureMotionGeneration?: MotionGenerationController }).rayureMotionGeneration = controller
+      ;(globalThis as { rayureSceneEntities?: SceneEntityRegistry }).rayureSceneEntities = sceneEntities
     }
   }
   catch (cause) {
@@ -86,11 +100,15 @@ function createGenerationController(
   config: RayureLocalConfig,
   server: CompanionServer,
   runtime: MotionSemanticRuntime,
+  sceneEntities: SceneEntityRegistry,
 ): MotionGenerationController | undefined {
   if (config.motionSemantic?.ardy === undefined) return undefined
   const service = runtime.createGenerationService()
   return new MotionGenerationController({
     generate: async (intent, history) => {
+      const constraints = intent.target === undefined
+        ? undefined
+        : [sceneEntities.resolveTarget(intent.target)]
       const result = await service.generate({
         cacheKey: intent.id,
         canonicalPrompt: intent.prompt,
@@ -98,9 +116,20 @@ function createGenerationController(
         numDenoisingSteps: intent.numDenoisingSteps ?? 4,
         cfgWeight: intent.cfgWeight ?? 2,
         ...(intent.signal === undefined ? {} : { signal: intent.signal }),
-        ...(history === undefined ? {} : { history }),
+        ...(history?.continuationId === undefined
+          ? history === undefined ? {} : { history: history.motion }
+          : {
+              continuation: {
+                id: history.continuationId,
+                consumedFrameCount: history.consumedFrameCount,
+            },
+            }),
+        ...(constraints === undefined ? {} : { constraints }),
       })
-      return result.motion
+      return {
+        motion: result.motion,
+        ...(result.continuationId === undefined ? {} : { continuationId: result.continuationId }),
+      }
     },
     publish: input => server.publishMotion(input),
     onError: (cause, intentId) => {

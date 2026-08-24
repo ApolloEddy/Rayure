@@ -6,6 +6,7 @@ import {
   PROTOCOL_VERSION,
   ProtocolValidationError,
   createClientHello,
+  createClientMotionPlayback,
   createServerModelAvailable,
   createServerMotionPublished,
   createServerWelcome,
@@ -17,6 +18,25 @@ test('client hello round-trips through the strict wire parser', () => {
   const hello = createClientHello({ id: 'hello-1', build: '0.1.0-dev' })
   assert.deepEqual(parseClientMessage(JSON.stringify(hello)), hello)
   assert.equal(hello.protocolVersion, PROTOCOL_VERSION)
+})
+
+test('renderer playback telemetry round-trips and accepts only bounded frame progress', () => {
+  const playback = createClientMotionPlayback({
+    id: 'playback-1',
+    motionId: 'generated-wave-1',
+    phase: 'progress',
+    frameIndex: 42,
+  })
+  assert.deepEqual(parseClientMessage(JSON.stringify(playback)), playback)
+
+  for (const payload of [
+    { protocolVersion: 1, type: 'motion.playback', id: 'x', payload: { motionId: 'motion', phase: 'wrong', frameIndex: 1 } },
+    { protocolVersion: 1, type: 'motion.playback', id: 'x', payload: { motionId: 'motion', phase: 'progress', frameIndex: -1 } },
+    { protocolVersion: 1, type: 'motion.playback', id: 'x', payload: { motionId: 'motion', phase: 'progress', frameIndex: 601 } },
+    { protocolVersion: 1, type: 'motion.playback', id: 'x', payload: { motionId: 'motion', phase: 'progress', frameIndex: 1, extra: true } },
+  ]) {
+    assert.throws(() => parseClientMessage(JSON.stringify(payload)), ProtocolValidationError)
+  }
 })
 
 test('server welcome must correlate to a valid client hello', () => {

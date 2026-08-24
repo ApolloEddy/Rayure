@@ -95,15 +95,16 @@ ARDY 文本条件用 LLM2Vec + Llama-3-8B-Instruct，默认 `cuda / bfloat16` �
 
 `scripts/generate.py` 产出 `.npz`：`posed_joints`（world-space 关节位置 `[T, J, 3]`）、local/global rotations、root positions、foot contacts、`fps`、`text`。交互式入口为 `load_model()` + `Ardy.autoregressive_step()`（text embedding + 可选约束 → motion frames）。
 
-## Bridge 待实现（包外）
+## Bridge 实现与连续性复核
 
 **参考实现已落仓库：[`scripts/ardy-bridge.py`](../../scripts/ardy-bridge.py)**（仓库内作为参考，运行时在 ARDY Python 环境内执行）：
 
 - 请求/结果/错误/取消四种消息形态，与 `apps/companion/src/ardy-process-protocol.ts` 冻结协议一一对应；
 - `load_model(text_encoder=False)` 显式不加载文本编码器，`text_feat`/`text_pad_mask` 直接来自 Rayure 的 `Motion Semantic Feature Cache`（`values` 按行主序 `[tokenCount, 4096]` 重排）；
-- 调用 `autoregressive_step(num_frames, num_denoising_steps, motion_mask=None, observed_motion=None, cfg_weight=(w, w), texts=None, text_feat, text_pad_mask, init_history_sequence, init_global_translation, init_first_heading_angle)`，输出经 `motion_rep.unnormalize` → `motion_rep.inverse` 取 `posed_joints`/`global_rot_mats`/`foot_contacts`；
+- 调用 `autoregressive_step(num_frames, num_denoising_steps, motion_mask, observed_motion, cfg_weight=(w, w), texts=None, text_feat, text_pad_mask, init_history_sequence, init_global_translation, init_first_heading_angle)`，输出经 `motion_rep.unnormalize` → `motion_rep.inverse` 取 `posed_joints`/`global_rot_mats`/`foot_contacts`；无约束时这两项为 `None`，有约束时由 ARDY 官方 condition set 实际构造；
 - 旋转矩阵转 `[x, y, z, w]` 四元数，帧时间按 `fps` 步进，脚接触按 skeleton 索引把 4 通道（左/右脚跟+脚尖）映射为关节名；
-- **续写策略（Spike 简化）**：Bridge 进程内有状态——保留上一步归一化 motion tensor 作为下一次的 `init_history_sequence`（ARDY 的 history 是其自身 hybrid 表示，posed_joints 无法直接回喂）；请求里的 Canonical `history` 字段在 Bridge 无内部状态时经 `motion_rep.forward` 转换，装到的版本不含该 API 则明确报错；
+- **续写策略（2026-08-24）**：Bridge 为每个返回段保存有界的不透明 continuation id 和对应内部 hybrid tensor；Companion 只会用 Renderer 已确认的 `consumedFrameCount` 取该特定 token 的前缀。Canonical `history` 不再尝试有损反推内部 tensor：无 continuation 的 legacy history 会明确拒绝，避免误接到“最近一次”生成状态；
+- **约束策略（2026-08-24）**：`Hips` 使用 `Root2DConstraintSet`，双手/双脚使用 `EndEffectorConstraintSet`，每个 EndEffector timestamp 同时补齐 ARDY 必需的 `Hips` 条件。真实 Core-Horizon40 已完成带右手目标的短段生成，且续写结果仍含新的 continuation；FullBody 暂未开放；
 - 启动失败（`checkpoints_dir` 缺失/模型加载失败）以 `startup` requestId 输出结构化错误退出。
 
 对接 `ArdyProcessClient` 的 `rayure.local.json` 示例（实测在用，`--ardy_path` 在 ardy 未 pip 安装时必需）：

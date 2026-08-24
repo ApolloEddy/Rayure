@@ -12,7 +12,7 @@ import {
 } from './ardy-process-protocol.ts'
 import type { ArdyMotionResult } from './ardy-process-protocol.ts'
 import type { MotionSemanticFeature } from '@rayure/protocol'
-import type { ArdyKinematicConstraint } from './ardy-process-protocol.ts'
+import type { ArdyKinematicConstraint, ArdyMotionContinuation } from './ardy-process-protocol.ts'
 import type { CanonicalMotion } from '@rayure/protocol'
 
 export const DEFAULT_ARDY_PROCESS_TIMEOUT_MS = 30_000
@@ -31,6 +31,7 @@ export interface ArdyProcessGenerationInput {
   numDenoisingSteps: number
   cfgWeight: number
   history?: CanonicalMotion
+  continuation?: ArdyMotionContinuation
   constraints?: readonly ArdyKinematicConstraint[]
   signal?: AbortSignal | undefined
 }
@@ -94,6 +95,7 @@ export class ArdyProcessClient {
       numDenoisingSteps: input.numDenoisingSteps,
       cfgWeight: input.cfgWeight,
       ...(input.history === undefined ? {} : { history: input.history }),
+      ...(input.continuation === undefined ? {} : { continuation: input.continuation }),
       ...(input.constraints === undefined ? {} : { constraints: input.constraints }),
     })
     const raw = `${serializeArdyProcessMessage(request)}\n`

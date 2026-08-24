@@ -36,6 +36,21 @@ export interface RayureMotionSemanticConfig {
     requestTimeoutMs: number
   } | undefined
   startupGenerate?: readonly RayureMotionGeneratePreset[] | undefined
+  scene?: RayureMotionSceneConfig | undefined
+}
+
+export interface RayureMotionSceneConfig {
+  entities?: readonly RayureMotionSceneEntity[] | undefined
+  transform?: {
+    origin?: readonly [number, number, number] | undefined
+    scale?: number | undefined
+  } | undefined
+}
+
+export interface RayureMotionSceneEntity {
+  id: string
+  position: readonly [number, number, number]
+  headingRadians?: number | undefined
 }
 
 export interface RayureMotionGeneratePreset {
@@ -161,6 +176,7 @@ function resolveMotionSemanticConfig(value: unknown): RayureMotionSemanticConfig
   if (root.textEncoder !== undefined) allowedKeys.push('textEncoder')
   if (root.ardy !== undefined) allowedKeys.push('ardy')
   if (root.startupGenerate !== undefined) allowedKeys.push('startupGenerate')
+  if (root.scene !== undefined) allowedKeys.push('scene')
   requireExactKeys(root, allowedKeys, 'motionSemantic config')
   if (allowedKeys.length === 0) throw new Error('motionSemantic config must define cachePath or textEncoder')
 
@@ -188,11 +204,70 @@ function resolveMotionSemanticConfig(value: unknown): RayureMotionSemanticConfig
     startupGenerate = resolveStartupGenerate(root.startupGenerate)
   }
 
+  const scene = root.scene === undefined ? undefined : resolveSceneConfig(root.scene)
+
   return {
     ...(cachePath === undefined ? {} : { cachePath }),
     ...(textEncoder === undefined ? {} : { textEncoder }),
     ...(ardy === undefined ? {} : { ardy }),
     ...(startupGenerate === undefined ? {} : { startupGenerate }),
+    ...(scene === undefined ? {} : { scene }),
+  }
+}
+
+function resolveSceneConfig(value: unknown): RayureMotionSceneConfig {
+  const root = requireRecord(value, 'motionSemantic scene')
+  const allowedKeys = []
+  if (root.entities !== undefined) allowedKeys.push('entities')
+  if (root.transform !== undefined) allowedKeys.push('transform')
+  requireExactKeys(root, allowedKeys, 'motionSemantic scene')
+  if (allowedKeys.length === 0) throw new Error('motionSemantic scene must define entities or transform')
+
+  let entities: RayureMotionSceneEntity[] | undefined
+  if (root.entities !== undefined) {
+    if (!Array.isArray(root.entities) || root.entities.length > 128) {
+      throw new Error('motionSemantic scene entities must contain up to 128 items')
+    }
+    const ids = new Set<string>()
+    entities = root.entities.map((item, index) => {
+      const entity = requireRecord(item, `motionSemantic scene entities[${index}]`)
+      const keys = ['id', 'position']
+      if (entity.headingRadians !== undefined) keys.push('headingRadians')
+      requireExactKeys(entity, keys, `motionSemantic scene entities[${index}]`)
+      const id = requireIdentifier(entity.id)
+      if (ids.has(id)) throw new Error(`motionSemantic scene entity id is duplicated: ${id}`)
+      ids.add(id)
+      const headingRadians = entity.headingRadians === undefined
+        ? undefined
+        : requireGenerateNumber(entity.headingRadians, `scene entity ${id} headingRadians`, -Math.PI * 8, Math.PI * 8)
+      return {
+        id,
+        position: requireVector3(entity.position, `scene entity ${id} position`),
+        ...(headingRadians === undefined ? {} : { headingRadians }),
+      }
+    })
+  }
+
+  let transform: RayureMotionSceneConfig['transform']
+  if (root.transform !== undefined) {
+    const source = requireRecord(root.transform, 'motionSemantic scene transform')
+    const keys = []
+    if (source.origin !== undefined) keys.push('origin')
+    if (source.scale !== undefined) keys.push('scale')
+    requireExactKeys(source, keys, 'motionSemantic scene transform')
+    if (keys.length === 0) throw new Error('motionSemantic scene transform must define origin or scale')
+    const scale = source.scale === undefined
+      ? undefined
+      : requireGenerateNumber(source.scale, 'scene transform scale', Number.MIN_VALUE, 1_000)
+    transform = {
+      ...(source.origin === undefined ? {} : { origin: requireVector3(source.origin, 'scene transform origin') }),
+      ...(scale === undefined ? {} : { scale }),
+    }
+  }
+
+  return {
+    ...(entities === undefined ? {} : { entities }),
+    ...(transform === undefined ? {} : { transform }),
   }
 }
 
@@ -281,6 +356,17 @@ function requirePrompt(value: unknown): string {
     throw new Error('Configured startupGenerate prompt must be a trimmed printable string up to 512 characters')
   }
   return value
+}
+
+function requireVector3(value: unknown, name: string): readonly [number, number, number] {
+  if (
+    !Array.isArray(value)
+    || value.length !== 3
+    || value.some(component => typeof component !== 'number' || !Number.isFinite(component))
+  ) {
+    throw new Error(`Configured ${name} must be a finite 3D vector`)
+  }
+  return [value[0], value[1], value[2]]
 }
 
 function requireAbsolutePmxPath(value: unknown): string {

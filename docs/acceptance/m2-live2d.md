@@ -1,6 +1,6 @@
 # M2 Live2D 原生调试验收
 
-状态：浏览器预检通过；Wallpaper Engine CEF 已证实本地 bundle、Companion 重连和 Live2D 资源链路；离线 Core、CEF 视觉/DevTools 与暂停恢复仍未关闭
+状态：浏览器预检与 2026-08-24 连续播放回归通过；Wallpaper Engine CEF 已证实旧版本地 bundle、Companion 重连和 Live2D 资源链路；本轮生成动作的播放回执、插值、待机回落仍须经过 CEF 视觉与 DevTools 验收，离线 Core 与暂停恢复也仍未关闭
 
 ## 范围
 
@@ -8,7 +8,7 @@
 
 ## 自动化门禁
 
-- `pnpm test`：协议 15 项、Companion 17 项、Wallpaper 49 项，共 81 项；
+- `pnpm test`：协议 20 项、Companion 73 项、Wallpaper 57 项，共 150 项；
 - `pnpm typecheck`：所有工作区 TypeScript 检查通过；
 - `pnpm build`：生成独立 Wallpaper Web wallpaper；
 - `scripts/verify.ps1`：依赖审计、AIRI 边界、构建产物和 Git 私有资源边界检查；
@@ -21,6 +21,12 @@
 3. 点击 `TapBody 1`，预期活动动作变成 `live2d-TapBody-0`；点击停止，预期活动动作清空。浏览器错误/警告日志应为空。
 4. 指定 `live2dCoreUrl` 为不存在的回环 `.js`，预期模型状态为 `Live2D model unavailable`，诊断标题包含 `Cubism Core could not be loaded`，原生 canvas 数量为 0；不应出现“已就绪”状态或未处理异常。
 5. 若机器有已授权的包外 Core，可使用 Vite `/@fs/` 形式传入 `live2dCoreUrl` 重做第 2、3 步；没有 Core 时离线失败是预期结果。
+
+## 2026-08-24 浏览器连续播放复核
+
+- 在使用包外 Hiyori 配置、已连接 Companion 的浏览器会话中，原生 Cubism canvas、模型状态、70 个参数和 10 个动作按钮均已出现；模型、物理、姿态、用户数据、纹理以及已发布的 Canonical Motion URL 均成功返回。
+- 全新重载后浏览器控制台为 0 个错误；触发 `TapBody 1` 后停止也未产生新的错误。
+- 这证明常规浏览器中的资源、WebSocket、生成动作拉取与 Native Motion 切换链路可用；它不替代 Wallpaper Engine CEF 的视觉、DevTools 或暂停恢复验收。
 
 ## Wallpaper Engine CEF 实机复核（2026-08-20）
 
@@ -42,7 +48,8 @@
 
 - CEF 能否执行本地 bundle 并创建原生 Cubism 画布；
 - Core、`.model3.json`、MOC3、纹理、物理和动作请求在 CEF 中是否都成功；
+- `motion.playback` 回执、Canonical Motion 帧间插值、根位移画布投影，以及生成动作结束/取消后恢复原生 Idle 是否在 CEF 中按预期执行；
 - 页面重载、Companion 重启、窗口暂停/恢复和动作替换后是否仍保持 generation 隔离与资源释放；
 - CEF DevTools 无未处理异常，实际画面无黑屏、纹理丢失或比例错误。
 
-当前已关闭“本地 bundle 执行、Companion 重连、模型与资源请求”证据；原生画布视觉、页面重载/暂停恢复、动作替换和 CEF DevTools 仍需在可观察的 CEF 调试窗口中逐项确认。在这些项目完成前，M2 不能作为正式发布完成条件。
+当前已关闭“本地 bundle 执行、Companion 重连、模型与资源请求”证据；原生画布视觉、本轮生成动作播放、页面重载/暂停恢复、动作替换和 CEF DevTools 仍需在可观察的 CEF 调试窗口中逐项确认。在这些项目完成前，M2 不能作为正式发布完成条件。

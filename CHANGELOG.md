@@ -2,6 +2,34 @@
 
 本项目的所有重要变更都会记录在此文件中。
 
+## [Unreleased] - 2026-08-24
+
+### 新增
+
+- 新增 Renderer → Companion 的 `motion.playback` 协议回执：仅当前已发布的动作描述符可上报有界、单调的 source-frame 进度；
+- 新增 Bridge 续写令牌合同和 `SceneEntityRegistry`：场景实体坐标经显式原点/比例变换后，可作为 `Hips`、双手、双脚的 ARDY 运动学目标，而语义 cache key 保持不变；
+- Bridge 结果现在携带不透明 continuation id；真实 ARDY Core 已验证带右手约束的 8 帧生成及使用同一语义特征的连续续写；
+- 新增生成动作根位移的 2D 画布投影、Hiyori `ParamLeg` 步态映射，以及 20 fps Canonical Motion 的帧间 lerp/slerp；
+
+### 变更
+
+- `MotionScheduler` 生产路径不再自行伪造时钟：下一段只使用 Renderer 已确认的前缀；抢占会取消生成器实际收到的 signal，发布回调失败会回滚未观察 buffer；
+- Live2D 的 native motion、generated Canonical Motion 和 debug fixture 改为互斥参数写入者。生成开始从当前参数 180 ms 混合，结束/取消后优先恢复原生 Idle；一次性 Idle 结束时会经防抖保护重新进入默认待机；
+- Bridge 使用 ARDY 官方 `Root2DConstraintSet` / `EndEffectorConstraintSet` 生成 `observed_motion` 与 `motion_mask`，并为 EndEffector 条件补齐必需的 `Hips` 行；
+- 冻结的 PMX/MMD 主机按需加载；`three-mmd-loader` 的 Node-only 可选分支改为显式浏览器诊断 stub，生产构建不再出现 browser-external 告警，最大 JS 分块降至 380 kB；
+
+### 修复
+
+- 修复 idle 时原生动作、debug fixture 与生成动作同时写 Live2D 参数造成的抖动；
+- 修复 ARDY continuation 错误取“全局最近状态”及 Canonical Motion 不可逆地重建内部 tensor 的问题；
+- 修复约束 index tensor 的 CPU/CUDA 设备错配、EndEffector 缺少 Hips 条件导致的断言失败，以及多行 Bridge 错误无法通过 JSONL 合同的问题；
+- 修复 Vite 将 `node:fs/promises` 与 `node:url` 外置到浏览器 bundle 的构建告警。
+
+### 验证
+
+- 协议 20 项、Companion 73 项、Wallpaper 57 项测试通过；TypeScript、Python Bridge 编译和生产构建通过；
+- 发布边界仍保持：私有模型、动作、场景、缓存和本地配置不会进入 Git 或 Wallpaper `dist`。Wallpaper Engine CEF 的新生成播放视觉/DevTools 门禁仍单独保留。
+
 ## [0.6.0-dev] - 2026-08-23
 
 ### 新增

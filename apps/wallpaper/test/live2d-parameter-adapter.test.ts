@@ -65,6 +65,24 @@ test('Live2D adapter skips controls whose calibrated joints are absent', () => {
   assert.ok(ids.includes('ParamAngleX'))
 })
 
+test('Live2D adapter maps alternating lower-body bend into Hiyori ParamLeg', () => {
+  const frame = makeFrame()
+  const walkingFrame: CanonicalMotionFrame = {
+    ...frame,
+    joints: {
+      ...frame.joints,
+      left_hip: { position: [-0.2, 1, 0], rotation: [0, 0, 0, 1] },
+      left_knee: { position: [-0.2, 0.5, 0], rotation: [0, 0, 0, 1] },
+      left_ankle: { position: [-0.2, 0, 0], rotation: [0, 0, 0, 1] },
+      right_hip: { position: [0.2, 1, 0], rotation: [0, 0, 0, 1] },
+      right_knee: { position: [0.2, 0.5, 0], rotation: [0, 0, 0, 1] },
+      right_ankle: { position: [0.7, 0.5, 0], rotation: [0, 0, 0, 1] },
+    },
+  }
+  const values = new Map(new Live2dParameterAdapter().mapFrame(walkingFrame).map(update => [update.parameterId, update.value]))
+  assert.equal(values.get('ParamLeg'), 1)
+})
+
 test('Live2D rig profiles reject duplicate parameters and invalid ranges', () => {
   assert.throws(() => validateLive2dRigProfile({
     ...STANDARD_LIVE2D_RIG_PROFILE,

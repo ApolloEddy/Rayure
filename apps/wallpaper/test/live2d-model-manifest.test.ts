@@ -70,7 +70,7 @@ test('Live2D display info scans the standard Rayure rig parameters', () => {
   const scan = scanLive2dRigProfile(parameters)
   assert.deepEqual(scan.missingParameterIds, [])
   assert.equal(scan.matchedParameterIds.length, STANDARD_LIVE2D_RIG_PROFILE.parameters.length)
-  assert.equal(scan.availableParameterCount, 11)
+  assert.equal(scan.availableParameterCount, 12)
 })
 
 test('Live2D manifest rejects traversal, duplicate paths, and invalid fade durations', () => {

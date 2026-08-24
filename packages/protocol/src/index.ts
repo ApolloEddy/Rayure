@@ -8,6 +8,7 @@ export const companionCapabilities = [
   'lifecycle.status',
   'model.catalog',
   'motion.catalog',
+  'motion.playback',
   'expression.control',
 ] as const
 export type CompanionCapability = typeof companionCapabilities[number]
@@ -19,6 +20,31 @@ export interface ClientHelloMessage {
   payload: {
     client: 'wallpaper'
     build: string
+  }
+}
+
+/**
+ * Renderer-to-Companion playback telemetry.  The renderer reports completed
+ * source frames rather than wall-clock time so a downstream generator can
+ * continue from an actually visible pose without assuming its own frame
+ * timing matches the display refresh rate.
+ */
+export const motionPlaybackPhases = [
+  'started',
+  'progress',
+  'completed',
+  'cancelled',
+] as const
+export type MotionPlaybackPhase = typeof motionPlaybackPhases[number]
+
+export interface ClientMotionPlaybackMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'motion.playback'
+  id: string
+  payload: {
+    motionId: string
+    phase: MotionPlaybackPhase
+    frameIndex: number
   }
 }
 
@@ -164,7 +190,7 @@ export interface ServerEmotePlayMessage {
   }
 }
 
-export type ClientMessage = ClientHelloMessage
+export type ClientMessage = ClientHelloMessage | ClientMotionPlaybackMessage
 export type ServerMessage =
   | ServerWelcomeMessage
   | ServerErrorMessage
@@ -192,6 +218,24 @@ export function createClientHello(input: { id: string, build: string }): ClientH
     payload: {
       client: 'wallpaper',
       build: requireDisplayString(input.build, 'build', 64),
+    },
+  }
+}
+
+export function createClientMotionPlayback(input: {
+  id: string
+  motionId: string
+  phase: MotionPlaybackPhase
+  frameIndex: number
+}): ClientMotionPlaybackMessage {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'motion.playback',
+    id: requireIdentifier(input.id, 'id'),
+    payload: {
+      motionId: requireIdentifier(input.motionId, 'motionId'),
+      phase: requireMotionPlaybackPhase(input.phase),
+      frameIndex: requireInteger(input.frameIndex, 'frameIndex', 0, 600),
     },
   }
 }
@@ -384,16 +428,29 @@ export function parseClientMessage(raw: string): ClientMessage {
   const value = parseWireObject(raw)
   requireExactKeys(value, ['protocolVersion', 'type', 'id', 'payload'], 'client message')
   requireProtocolVersion(value.protocolVersion)
-  if (value.type !== 'client.hello') throw new ProtocolValidationError('Unsupported client message type')
+  if (value.type === 'client.hello') {
+    const payload = requireRecord(value.payload, 'client hello payload')
+    requireExactKeys(payload, ['client', 'build'], 'client hello payload')
+    if (payload.client !== 'wallpaper') throw new ProtocolValidationError('client must be wallpaper')
 
-  const payload = requireRecord(value.payload, 'client hello payload')
-  requireExactKeys(payload, ['client', 'build'], 'client hello payload')
-  if (payload.client !== 'wallpaper') throw new ProtocolValidationError('client must be wallpaper')
+    return createClientHello({
+      id: requireIdentifier(value.id, 'id'),
+      build: requireDisplayString(payload.build, 'build', 64),
+    })
+  }
 
-  return createClientHello({
-    id: requireIdentifier(value.id, 'id'),
-    build: requireDisplayString(payload.build, 'build', 64),
-  })
+  if (value.type === 'motion.playback') {
+    const payload = requireRecord(value.payload, 'motion playback payload')
+    requireExactKeys(payload, ['motionId', 'phase', 'frameIndex'], 'motion playback payload')
+    return createClientMotionPlayback({
+      id: requireIdentifier(value.id, 'id'),
+      motionId: requireIdentifier(payload.motionId, 'motionId'),
+      phase: requireMotionPlaybackPhase(payload.phase),
+      frameIndex: requireInteger(payload.frameIndex, 'frameIndex', 0, 600),
+    })
+  }
+
+  throw new ProtocolValidationError('Unsupported client message type')
 }
 
 export function parseServerMessage(raw: string): ServerMessage {
@@ -637,6 +694,13 @@ function requireCapabilities(value: unknown): readonly CompanionCapability[] {
     result.push(capability as CompanionCapability)
   }
   return result
+}
+
+function requireMotionPlaybackPhase(value: unknown): MotionPlaybackPhase {
+  if (typeof value !== 'string' || !motionPlaybackPhases.includes(value as MotionPlaybackPhase)) {
+    throw new ProtocolValidationError('motion playback phase is invalid')
+  }
+  return value as MotionPlaybackPhase
 }
 
 function requireErrorCode(value: unknown): ServerErrorCode {

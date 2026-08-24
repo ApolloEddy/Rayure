@@ -19,7 +19,12 @@ import {
   serializeWireMessage,
   validateCanonicalMotion,
 } from '@rayure/protocol'
-import type { CanonicalMotion, Live2dMotionDescriptor, MotionDescriptor } from '@rayure/protocol'
+import type {
+  CanonicalMotion,
+  ClientMotionPlaybackMessage,
+  Live2dMotionDescriptor,
+  MotionDescriptor,
+} from '@rayure/protocol'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { RawData } from 'ws'
 
@@ -58,6 +63,7 @@ export interface CompanionServerOptions {
   createAssetToken?: () => string
   model?: CompanionModelSource
   motions?: readonly CompanionMotionSource[]
+  onMotionPlayback?: (payload: ClientMotionPlaybackMessage['payload']) => void
 }
 
 export interface CompanionServerAddress {
@@ -132,6 +138,7 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
   let preparedMotions: readonly PreparedMotion[] = []
   const assetTokenMap = new Map<string, PreparedAsset>()
   const generatedTokenMap = new Map<string, PreparedGeneratedMotion>()
+  let generatedMotionSequence = 0
   let startPromise: Promise<CompanionServerAddress> | undefined
   let stopPromise: Promise<void> | undefined
   const welcomedClients = new Set<WebSocket>()
@@ -158,6 +165,7 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
     try {
       assetTokenMap.clear()
       generatedTokenMap.clear()
+      generatedMotionSequence = 0
       preparedModel = options.model === undefined
         ? undefined
         : await prepareModel(options.model, createAssetToken())
@@ -265,7 +273,21 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
       }
 
       if (welcomed) {
-        sendErrorAndClose(socket, 'duplicate_hello', 'Client hello has already completed', 1008, message.id)
+        if (message.type === 'client.hello') {
+          sendErrorAndClose(socket, 'duplicate_hello', 'Client hello has already completed', 1008, message.id)
+          return
+        }
+        try {
+          options.onMotionPlayback?.(message.payload)
+        }
+        catch {
+          // Observation callbacks cannot own a healthy renderer session.
+        }
+        return
+      }
+
+      if (message.type !== 'client.hello') {
+        sendErrorAndClose(socket, 'invalid_message', 'Client hello must be the first message', 1008, message.id)
         return
       }
 
@@ -418,7 +440,7 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
     if (phase !== 'running' || address === undefined) {
       throw new Error('Companion must be running before publishing a generated motion')
     }
-    const motionId = requireMotionId(input.id)
+    const motionId = createPublishedMotionId(requireMotionId(input.id), ++generatedMotionSequence)
     const displayName = requireDisplayName(input.displayName, 'generated motion displayName', 96)
     validateCanonicalMotion(input.motion)
     const content = Buffer.from(JSON.stringify(input.motion), 'utf8')
@@ -874,6 +896,17 @@ function requireMotionId(value: unknown): string {
     throw new Error('generated motion id must be a 1-64 character identifier')
   }
   return value
+}
+
+function createPublishedMotionId(baseId: string, sequence: number): string {
+  if (!Number.isSafeInteger(sequence) || sequence < 1) {
+    throw new Error('generated motion publication sequence is invalid')
+  }
+  const result = `${baseId}-${sequence.toString(36)}`
+  if (result.length > 64) {
+    throw new Error('generated motion id is too long to create a unique publication id')
+  }
+  return result
 }
 
 function requireDisplayName(value: unknown, name: string, maximumLength: number): string {

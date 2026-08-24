@@ -7,7 +7,12 @@ import test from 'node:test'
 
 import WebSocket from 'ws'
 
-import { PROTOCOL_VERSION, createClientHello, parseServerMessage } from '@rayure/protocol'
+import {
+  PROTOCOL_VERSION,
+  createClientHello,
+  createClientMotionPlayback,
+  parseServerMessage,
+} from '@rayure/protocol'
 import { createCompanionServer } from '../src/server.ts'
 import { ARDY_CORE_JOINT_NAMES, convertArdyMotion } from '../src/ardy-motion-adapter.ts'
 
@@ -74,6 +79,39 @@ test('silent and duplicate handshakes cannot leave ambiguous sessions', async (t
   duplicate.send(hello)
   const [duplicateCode] = await once(duplicate, 'close')
   assert.equal(duplicateCode, 1008)
+})
+
+test('a welcomed renderer can report bounded generated-motion progress without reopening its handshake', async (t) => {
+  let resolveObserved: ((payload: { motionId: string, phase: string, frameIndex: number }) => void) | undefined
+  const observed = new Promise<{ motionId: string, phase: string, frameIndex: number }>(resolve => {
+    resolveObserved = resolve
+  })
+  const server = createCompanionServer({
+    port: 0,
+    helloTimeoutMs: 500,
+    onMotionPlayback: payload => resolveObserved?.(payload),
+  })
+  const address = await server.start()
+  t.after(() => server.stop())
+
+  const socket = new WebSocket(`ws://${address.host}:${address.port}/ws`)
+  t.after(() => socket.close())
+  await once(socket, 'open')
+  socket.send(JSON.stringify(createClientHello({ id: 'hello-playback', build: 'test' })))
+  await once(socket, 'message')
+
+  socket.send(JSON.stringify(createClientMotionPlayback({
+    id: 'playback-1',
+    motionId: 'generated-wave-1',
+    phase: 'progress',
+    frameIndex: 7,
+  })))
+  assert.deepEqual(await observed, {
+    motionId: 'generated-wave-1',
+    phase: 'progress',
+    frameIndex: 7,
+  })
+  assert.equal(socket.readyState, WebSocket.OPEN)
 })
 
 test('start and stop are idempotent and terminal state is observable', async () => {
@@ -372,7 +410,7 @@ test('publishMotion announces the descriptor and serves the generated frame memo
     displayName: 'Generated Wave',
     motion: makeGeneratedMotion(),
   })
-  assert.equal(published.id, 'generated-wave')
+  assert.equal(published.id, 'generated-wave-1')
   assert.equal(published.format, 'canonical')
 
   const [publishedData] = await once(socket, 'message')

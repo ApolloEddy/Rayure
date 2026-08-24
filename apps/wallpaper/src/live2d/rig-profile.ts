@@ -15,6 +15,7 @@ export type Live2dControl =
   | 'rightArmAngle'
   | 'leftElbowAngle'
   | 'rightElbowAngle'
+  | 'legPhase'
 
 export interface Live2dJointBindings {
   head: string
@@ -24,6 +25,12 @@ export interface Live2dJointBindings {
   rightShoulder: string
   rightElbow: string
   rightWrist: string
+  leftHip?: string
+  leftKnee?: string
+  leftAnkle?: string
+  rightHip?: string
+  rightKnee?: string
+  rightAnkle?: string
 }
 
 export interface Live2dParameterBinding {
@@ -51,6 +58,8 @@ export interface Live2dParameterUpdate {
 
 export interface Live2dParameterSink {
   setParameterValue(parameterId: string, value: number): void
+  /** Optional full-pose hook for renderers that also project root motion. */
+  onMotionFrame?(frame: CanonicalMotionFrame): void
 }
 
 export const STANDARD_LIVE2D_RIG_PROFILE: Readonly<Live2dRigProfile> = {
@@ -63,6 +72,12 @@ export const STANDARD_LIVE2D_RIG_PROFILE: Readonly<Live2dRigProfile> = {
     rightShoulder: 'right_shoulder',
     rightElbow: 'right_elbow',
     rightWrist: 'right_wrist',
+    leftHip: 'left_hip',
+    leftKnee: 'left_knee',
+    leftAnkle: 'left_ankle',
+    rightHip: 'right_hip',
+    rightKnee: 'right_knee',
+    rightAnkle: 'right_ankle',
   },
   parameters: [
     { parameterId: 'ParamAngleX', control: 'headYaw', min: -30, max: 30, neutral: 0 },
@@ -75,6 +90,10 @@ export const STANDARD_LIVE2D_RIG_PROFILE: Readonly<Live2dRigProfile> = {
     { parameterId: 'ParamArmRA', control: 'rightArmAngle', min: -90, max: 90, neutral: 0 },
     { parameterId: 'ParamArmLB', control: 'leftElbowAngle', min: 0, max: 180, neutral: 90, mode: 'absolute' },
     { parameterId: 'ParamArmRB', control: 'rightElbowAngle', min: 0, max: 180, neutral: 90, mode: 'absolute' },
+    // Hiyori exposes one signed leg-cycle parameter. It cannot convey full
+    // 3D locomotion, but it makes alternating ARDY gait visible instead of
+    // dropping all lower-body information at the adapter boundary.
+    { parameterId: 'ParamLeg', control: 'legPhase', min: -1, max: 1, neutral: 0 },
   ],
 }
 
@@ -130,6 +149,18 @@ export function validateLive2dRigProfile(profile: Live2dRigProfile): void {
   if (!Array.isArray(profile.parameters) || profile.parameters.length === 0) {
     throw new Error('Live2D rig profile must define at least one parameter')
   }
+  const needsLegBindings = profile.parameters.some(binding => binding.control === 'legPhase')
+  if (needsLegBindings) {
+    const legKeys: readonly (keyof Live2dJointBindings)[] = [
+      'leftHip', 'leftKnee', 'leftAnkle', 'rightHip', 'rightKnee', 'rightAnkle',
+    ]
+    for (const key of legKeys) {
+      const jointName = profile.joints?.[key]
+      if (typeof jointName !== 'string' || jointName.trim() !== jointName || jointName.length === 0 || jointName.length > 64) {
+        throw new Error(`Live2D rig profile leg joint binding is invalid: ${key}`)
+      }
+    }
+  }
   const parameterIds = new Set<string>()
   for (const binding of profile.parameters) {
     if (typeof binding.parameterId !== 'string' || binding.parameterId.trim() !== binding.parameterId || binding.parameterId.length === 0) {
@@ -168,6 +199,7 @@ function readControl(
     case 'rightArmAngle': return readPlanarAngle(frame, joints.rightShoulder, joints.rightElbow)
     case 'leftElbowAngle': return readElbowAngle(frame, joints.leftShoulder, joints.leftElbow, joints.leftWrist)
     case 'rightElbowAngle': return readElbowAngle(frame, joints.rightShoulder, joints.rightElbow, joints.rightWrist)
+    case 'legPhase': return readLegPhase(frame, joints)
   }
 }
 
@@ -204,6 +236,22 @@ function readElbowAngle(
   if (denominator <= 1e-6) return undefined
   const cosine = clamp(dot(first, second) / denominator, -1, 1)
   return Math.acos(cosine) * 180 / Math.PI
+}
+
+function readLegPhase(frame: CanonicalMotionFrame, joints: Live2dJointBindings): number | undefined {
+  const keys = [
+    joints.leftHip,
+    joints.leftKnee,
+    joints.leftAnkle,
+    joints.rightHip,
+    joints.rightKnee,
+    joints.rightAnkle,
+  ]
+  if (keys.some(key => key === undefined)) return undefined
+  const left = readElbowAngle(frame, joints.leftHip!, joints.leftKnee!, joints.leftAnkle!)
+  const right = readElbowAngle(frame, joints.rightHip!, joints.rightKnee!, joints.rightAnkle!)
+  if (left === undefined || right === undefined) return undefined
+  return clamp((left - right) / 90, -1, 1)
 }
 
 function quaternionToEuler(quaternion: CanonicalQuaternion): { yaw: number, pitch: number, roll: number } {

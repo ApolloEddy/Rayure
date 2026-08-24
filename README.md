@@ -4,7 +4,9 @@ Rayure 是一个面向 Wallpaper Engine 的本地优先桌面角色运行时。�
 
 ## 当前状态
 
-**语义动作生成端到端闭环已打通并在真实硬件上验收**：文本意图 → 语义特征缓存 → ARDY 扩散模型（本地 GPU）→ Canonical Motion → 令牌化广播 → Live2D 角色实时播放。全程无云端推理依赖。
+**语义动作生成到 Live2D 播放的主链已闭环**：文本意图 → 语义特征缓存 → ARDY 扩散模型（本地 GPU）→ Canonical Motion → 令牌化广播 → 原生 Cubism 参数与画布运动。全程无云端推理依赖。
+
+2026-08-24 的连续性修复已完成：Renderer 会把实际播放帧回报给 Companion；下一段只续写该已确认前缀；Bridge 使用不透明 continuation 而非猜测 Canonical JSON；生成动作独占 Live2D 参数写入、插值并平滑回到原生 Idle。普通浏览器和自动化回归已通过；本轮新增播放逻辑仍需在 Wallpaper Engine CEF 中完成视觉/DevTools 门禁，不能把浏览器结果误报为该门禁已关闭。
 
 ```text
 Rayure Behavior（未来 ASR/LLM 意图层）
@@ -12,7 +14,7 @@ Rayure Behavior（未来 ASR/LLM 意图层）
   -> Motion Semantic Feature Cache（AutoDL 一次性预置，30k 条）
   -> ARDY Bridge（本地 Python 子进程，RTX 4060 实测）
   -> Canonical Motion（27 关节，renderer 无关）
-  -> 令牌化 motion.published 广播
+  -> 令牌化 motion.published 广播 + motion.playback 回执
   -> Rig Adapter
        |- Live2D Adapter（当前主线，Hiyori 已验收）
        `- 3D Adapter（冻结回归基线）
@@ -20,23 +22,24 @@ Rayure Behavior（未来 ASR/LLM 意图层）
 
 已完成的里程碑：
 
-- **ARDY Bridge**（`scripts/ardy-bridge.py`）：JSONL 协议子进程，在 RTX 4060 8GB 上以真实权重运行；支持 history 续写（连续动作不打断）、请求超时与取消、stdout 重定向防协议污染；首段实测修复了官方参考实现的 6 处缺陷（参数名、text_encoder 加载、foot_contacts 骨骼映射、numFrames 语义、history 重复计数等）。
+- **ARDY Bridge**（`scripts/ardy-bridge.py`）：JSONL 协议子进程，在 RTX 4060 8GB 上以真实权重运行；续写令牌与具体生成段一一对应，Renderer 确认的帧数决定其按 ARDY token 对齐的裁剪位置，绝不回退到“最近一次”全局状态或不可靠的 Canonical JSON 反推。`Hips`、双手和双脚的 Root2D/EndEffector 约束已经过真实短段与连续续写验证。
 - **云端词向量生产线**（`autodl/`）：DeepSeek 按 21 类动作 × 速度/幅度/情感/方向四维修饰批量展开意图字典，AutoDL 24GB 卡用 LLM2Vec（llama-3-8b）一次性编码为 30,011 条语义特征（fp16 / 4096 维 / 约 323 MB），本地 Companion 启动即缓存命中，**运行时完全不需要文本编码器**。
-- **MotionScheduler 连续调度**：真实时间推进、抢占式打断在途生成、把已消费段作为 history 续写下一段——离散文生模型因此成为连续可打断的动作引擎。
-- **Live2D 原生渲染**：Hiyori 官方示例模型在浏览器与 Wallpaper Engine 中正常显示；修复了画布拉伸变形、3D 占位装饰遮挡、私有场景贴图加载挂起等显示问题。
+- **MotionScheduler 连续调度**：`advance()` 仅保留给 headless 测试；生产续写只采用 Renderer 的 `motion.playback` 回执。抢占会取消生成器实际收到的 signal，发布失败的未观察 buffer 会回滚。
+- **Live2D 原生渲染**：生成动作、原生动作和 debug fixture 现在是互斥的单一参数写入者；20 fps Canonical Motion 在渲染帧间做位置线性插值和四元数 slerp，生成开始采用 180 ms 参数混合，根位移投影到画布且 Hiyori `ParamLeg` 会表达步态。
+- **浏览器构建**：冻结的 PMX/MMD 主机按需加载；第三方依赖的 Node-only 可选分支有明确浏览器 stub，不再产生 Vite browser-external 告警，最大 JS 分块为 380 kB。
 
-`CHANGELOG.md` 已记录到 `0.6.0-dev`（此前的 3D 记录为 0.4.8），根工作区 manifest 仍为 0.2.0。本仓库应视为开发快照。当前统一验证 136 项测试、TypeScript、生产构建与发布边界审计全部通过。
+`CHANGELOG.md` 已记录 2026-08-24 的未发布变更（最新开发基线为 `0.6.0-dev`，此前的 3D 记录为 0.4.8），根工作区 manifest 仍为 0.2.0。本仓库应视为开发快照。当前统一验证 150 项测试、TypeScript、Python Bridge 编译、生产构建与发布边界审计全部通过。
 
 ## 已实现
 
 - Wallpaper Engine 官方 Web wallpaper 项目、用户属性、中英文本地化、FPS 与暂停生命周期；
-- Three.js + `@yohawing/three-mmd-loader` 的外置 PMX、材质和中文纹理加载（冻结基线）；
+- Three.js + `@yohawing/three-mmd-loader` 的外置 PMX、材质和中文纹理加载（冻结基线，主机按需分块加载）；
 - 仅绑定 `127.0.0.1`、固定使用 `/ws` 的 Local Companion；
-- 严格版本化协议、16 KiB 消息上限、未知字段拒绝和握手状态校验；
+- 严格版本化协议、16 KiB 消息上限、未知字段拒绝、握手状态校验，以及仅对当前已发布动作生效的 `motion.playback` 播放回执；
 - 随机会话令牌保护的只读模型/动作网关，以及 Origin、方法、扩展名、大小和 realpath 边界校验；
 - 严格的 27 关节 `Canonical Motion v1` 合同与校验；
-- Live2D：`.model3.json` 清单校验、标准参数 RigProfile、原生 Cubism 调试画布（Core 来源受控）、motion3 动作目录与播放、Canonical Motion 运行时播放；
-- ARDY 动作生成：进程协议、语义特征缓存（内存/文件、fp16/fp32、token mask）、Text Encoder API 客户端（可选）、启动预设生成与实时意图入口 `globalThis.rayureMotionGeneration`；
+- Live2D：`.model3.json` 清单校验、标准参数 RigProfile、原生 Cubism 调试画布（Core 来源受控）、motion3 动作目录、互斥播放槽、Canonical Motion 插值/根位移/步态映射；
+- ARDY 动作生成：进程协议、语义特征缓存（内存/文件、fp16/fp32、token mask）、Text Encoder API 客户端（可选）、启动预设生成、实体坐标约束与实时意图入口 `globalThis.rayureMotionGeneration`；
 - 模型和动作异步加载的 generation 隔离、失败保留、迟到结果释放与资源清理；
 - `scripts/verify.ps1` 统一执行测试、TypeScript、生产构建、依赖审计和发布边界检查。
 
@@ -55,7 +58,8 @@ Wallpaper Engine / CEF
        |- strict versioned protocol
        |- tokenized read-only asset gateway
        |- Motion Semantic Feature Cache
-       |- MotionScheduler（打断/续写调度）
+       |- MotionScheduler（Renderer 回执、打断/续写调度）
+       |- SceneEntityRegistry（坐标变换/目标约束）
        `- ARDY Bridge 子进程（JSONL / stdio）
                  |
                  v
@@ -67,9 +71,9 @@ Wallpaper Engine / CEF
 ## 动作生成链路
 
 1. **字典编译（一次性，云端）**：`autodl/generate-dictionary.py` 用 DeepSeek 展开意图种子；`autodl/generate-embeddings.py` 在 AutoDL 上用 LLM2Vec 批量编码，产出 `motion-features.json`（`rayure.motion-semantic-cache.v1`，上限 512 MiB / 10 万条）。详见 [autodl/README.md](autodl/README.md)。
-2. **本地运行**：Companion 启动时加载缓存（30k 条约 40 秒），`startupGenerate` 预设直接缓存命中并生成；运行时可通过 `globalThis.rayureMotionGeneration.submitIntent(...)` 注入新意图。
-3. **生成与发布**：ARDY Bridge 按请求生成新帧（numFrames 为新增帧数，内部多步自回归 + history 裁剪），转成 Canonical Motion 后由 Companion 以 `/assets/<token>/<motionId>.json` 提供并广播。
-4. **播放**：Wallpaper 收到 `motion.published` 后经令牌化 URL 拉取、严格校验，交给 `CanonicalMotionPlayer` 驱动 Live2D 参数 sink；generation 隔离保证旧意图的迟到结果不会覆盖新动作。
+2. **本地运行**：Companion 启动时加载缓存（30k 条约 40 秒），`startupGenerate` 预设直接缓存命中并生成；运行时可通过 `globalThis.rayureMotionGeneration.submitIntent(...)` 注入新意图，也可指定已注册实体目标。
+3. **生成与发布**：ARDY Bridge 按请求生成新帧（numFrames 为新增帧数，内部多步自回归 + history 裁剪），转成 Canonical Motion 后以 `/assets/<token>/<motionId>.json` 提供并广播。每个结果携带仅供 Companion/Bridge 使用的不透明 continuation id。
+4. **播放与续写**：Wallpaper 收到 `motion.published` 后经令牌化 URL 拉取、严格校验，交给 `CanonicalMotionPlayer` 插值驱动 Live2D；每个实际消费的 source frame 经 `motion.playback` 回报，下一意图只使用当前描述符和该确认帧数的 continuation。
 
 ## 环境
 
@@ -116,13 +120,20 @@ pnpm dev:wallpaper   # 端口 4173
     },
     "startupGenerate": [
       { "id": "wave.casual", "prompt": "A person waves their hand casually", "numFrames": 60 }
-    ]
+    ],
+    "scene": {
+      "transform": { "origin": [0, 0, 0], "scale": 1 },
+      "entities": [
+        { "id": "tea-cup", "position": [0.3, 0.8, 0.4] }
+      ]
+    }
   }
 }
 ```
 
 - `model.format` 支持 `pmx`（3D 基线）与 `live2d`（当前主线）；
 - `startupGenerate` 的 `id`/`prompt` 需与缓存条目的 `cacheKey`/`canonicalPrompt` 一致才会命中；
+- 可由行为层调用 `submitIntent({ ..., target: { entityId: 'tea-cup', joint: 'RightHand', timeMs: 200 } })`；坐标仅形成空间约束，不改变语义 cache key。当前 Bridge 支持 `Hips`、双手和双脚目标，FullBody 约束仍是后续能力；
 - 角色、动作、embedding 缓存、录制和场景素材均被 Git 排除；Renderer 只接收一次性回环 URL，不接收磁盘路径。
 
 调试入口：`?live2dDebug=1`（参数探针）、`?live2dModelUrl=...`（手动指定模型）、`?live2dCoreUrl=...`（Core 来源）。
@@ -138,17 +149,16 @@ pnpm dev:wallpaper   # 端口 4173
 
 ## 下一阶段
 
-1. **播放质量**：Canonical Motion 帧间插值（当前 20fps step 保持，60fps 渲染下有阶梯感）；待机回落从调试 fixture 切换为原生 Idle / ARDY 待机池；
-2. **衔接与预取**：replan buffer 式提前生成（NVIDIA 交互 demo 同款策略），播放侧姿态快照 crossfade 兜底；
-3. **约束交互**：Bridge 接入 ARDY constraints（Root2D / EndEffector / FullBody），语义 embedding 与空间约束正交复用，支撑接触类动作；
-4. **行为层**：ASR/LLM 意图接入 `submitIntent`，TTS 口型与视觉派生事件；
-5. Live2D 闭环稳定后，让现有 3D Renderer 作为第二个 Rig Adapter 回归。
+1. **衔接与预取**：加入 replan buffer 式提前生成与多段姿态 crossfade，缩小长推理时“请求时已确认前缀”和“结果到达时当前姿态”之间的时差；
+2. **约束交互**：把目前的 Hips/手/脚 Root2D/EndEffector 扩展到经实测的 FullBody 约束和动态场景采样；
+3. **行为层**：ASR/LLM 意图接入 `submitIntent`，TTS 口型与视觉派生事件；
+4. Live2D 闭环稳定后，让现有 3D Renderer 作为第二个 Rig Adapter 回归。
 
 ## 尚未完成
 
-- 帧间插值、待机池与动作间平滑过渡（当前已知：待机回落到调试 fixture、20fps 无插值）；
-- ARDY constraints 管线（协议扩展 + Bridge 载荷 + 场景实体注册表）；
-- 合规获取的离线 Cubism Core 文件与 Wallpaper Engine CEF 完整实机验收（DevTools、暂停恢复）；
+- ARDY 待机动作池、预测式 replan buffer 和跨段姿态 crossfade；
+- 经过实机验证的 FullBody ARDY constraints（当前只开放 Hips、双手、双脚）；
+- 合规获取的离线 Cubism Core 文件，以及本轮生成播放在 Wallpaper Engine CEF 中的画面、DevTools、暂停/恢复实机验收；
 - ASR、LLM、TTS、口型和音频播放；
 - 摄像头、MediaPipe 与最小化派生视觉事件；
 - 首次配对、设置界面、自动启动、升级、多显示器、睡眠唤醒和长时间稳定性验收；

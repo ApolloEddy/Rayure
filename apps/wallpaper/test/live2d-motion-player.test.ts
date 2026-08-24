@@ -59,6 +59,40 @@ test('Live2D motion player applies recorded frames in timestamp order', () => {
   assert.equal(player.isPlaying, false)
 })
 
+test('Live2D motion player interpolates sparse Canonical Motion between source frames', () => {
+  const received: Array<[string, number]> = []
+  const player = new Live2dMotionPlayer({
+    setParameterValue: (id, value) => received.push([id, value]),
+  })
+  player.bind(makeMotion())
+
+  player.advance(0)
+  player.advance(0.05)
+  const angle = received.filter(([id]) => id === 'ParamAngleX').at(-1)?.[1]
+  assert.ok(angle !== undefined)
+  assert.ok(Math.abs(angle - 10) < 0.001, `expected midpoint yaw, got ${angle}`)
+  assert.equal(player.consumedFrameCount, 1)
+})
+
+test('Live2D motion player exposes the interpolated root pose to a projection sink', () => {
+  const motion = makeMotion()
+  const movingMotion: CanonicalMotion = {
+    ...motion,
+    frames: motion.frames.map((frame, index) => index === 1
+      ? { ...frame, rootPosition: [10, 0, 0] }
+      : frame),
+  }
+  const roots: number[] = []
+  const player = new Live2dMotionPlayer({
+    setParameterValue: () => undefined,
+    onMotionFrame: frame => roots.push(frame.rootPosition[0]),
+  })
+  player.bind(movingMotion)
+  player.advance(0)
+  player.advance(0.05)
+  assert.equal(roots.at(-1), 5)
+})
+
 test('Live2D motion player stops and ignores invalid time deltas', () => {
   const received: Array<[string, number]> = []
   const player = new Live2dMotionPlayer({

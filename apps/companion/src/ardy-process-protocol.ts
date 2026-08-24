@@ -9,11 +9,16 @@ import type {
   MotionSemanticFeature,
 } from '@rayure/protocol'
 
-import {
-  ARDY_CORE_JOINT_NAMES,
-  convertArdyMotion,
-} from './ardy-motion-adapter.ts'
-import type { ArdyMotionSource } from './ardy-motion-adapter.ts'
+import { convertArdyMotion } from './ardy-motion-adapter.ts'
+
+/** Official ARDY condition-set endpoint names exposed by the bridge. */
+export const ARDY_CONSTRAINABLE_JOINT_NAMES = [
+  'Hips',
+  'LeftHand',
+  'RightHand',
+  'LeftFoot',
+  'RightFoot',
+] as const
 
 export const ARDY_PROCESS_REQUEST_SCHEMA = 'rayure.ardy-process-request.v1' as const
 export const ARDY_PROCESS_RESULT_SCHEMA = 'rayure.ardy-process-result.v1' as const
@@ -26,6 +31,12 @@ export interface ArdyKinematicConstraint {
   rotation?: CanonicalQuaternion
 }
 
+/** Opaque bridge-owned tensor state for an already renderer-confirmed prefix. */
+export interface ArdyMotionContinuation {
+  id: string
+  consumedFrameCount: number
+}
+
 export interface ArdyMotionGenerationRequest {
   schema: typeof ARDY_PROCESS_REQUEST_SCHEMA
   type: 'generate'
@@ -36,6 +47,7 @@ export interface ArdyMotionGenerationRequest {
   numDenoisingSteps: number
   cfgWeight: number
   history?: CanonicalMotion
+  continuation?: ArdyMotionContinuation
   constraints?: readonly ArdyKinematicConstraint[]
 }
 
@@ -50,6 +62,7 @@ export type ArdyProcessRequest = ArdyMotionGenerationRequest | ArdyMotionCancelM
 export interface ArdyMotionResult {
   requestId: string
   motion: CanonicalMotion
+  continuationId?: string | undefined
 }
 
 export function createArdyMotionRequest(input: {
@@ -59,6 +72,7 @@ export function createArdyMotionRequest(input: {
   numDenoisingSteps: number
   cfgWeight: number
   history?: CanonicalMotion
+  continuation?: ArdyMotionContinuation
   constraints?: readonly ArdyKinematicConstraint[]
 }): ArdyMotionGenerationRequest {
   const requestId = requireIdentifier(input.requestId, 'ARDY requestId')
@@ -67,6 +81,10 @@ export function createArdyMotionRequest(input: {
   const numDenoisingSteps = requireInteger(input.numDenoisingSteps, 'ARDY numDenoisingSteps', 1, 20)
   const cfgWeight = requireFiniteNumber(input.cfgWeight, 'ARDY cfgWeight', 0, 20)
   if (input.history !== undefined) validateCanonicalMotion(input.history)
+  const continuation = input.continuation === undefined ? undefined : validateContinuation(input.continuation)
+  if (input.history !== undefined && continuation !== undefined) {
+    throw new Error('ARDY history and continuation cannot both be supplied')
+  }
   const constraints = input.constraints === undefined
     ? undefined
     : validateConstraints(input.constraints)
@@ -80,6 +98,7 @@ export function createArdyMotionRequest(input: {
     numDenoisingSteps,
     cfgWeight,
     ...(input.history === undefined ? {} : { history: input.history }),
+    ...(continuation === undefined ? {} : { continuation }),
     ...(constraints === undefined ? {} : { constraints }),
   }
 }
@@ -110,11 +129,25 @@ export function parseArdyMotionResponse(raw: string, expectedRequestId: string):
   }
 
   if (root.schema !== ARDY_PROCESS_RESULT_SCHEMA) throw new Error('Unsupported ARDY process response schema')
-  requireExactKeys(root, ['schema', 'type', 'requestId', 'motion'], 'ARDY process result')
+  const resultKeys = ['schema', 'type', 'requestId', 'motion']
+  if (root.continuationId !== undefined) resultKeys.push('continuationId')
+  requireExactKeys(root, resultKeys, 'ARDY process result')
   if (root.type !== 'result') throw new Error('ARDY process result type is invalid')
   return {
     requestId,
     motion: convertArdyMotion(root.motion),
+    ...(root.continuationId === undefined
+      ? {}
+      : { continuationId: requireIdentifier(root.continuationId, 'ARDY continuationId') }),
+  }
+}
+
+function validateContinuation(value: ArdyMotionContinuation): ArdyMotionContinuation {
+  const root = requireRecord(value, 'ARDY continuation')
+  requireExactKeys(root, ['id', 'consumedFrameCount'], 'ARDY continuation')
+  return {
+    id: requireIdentifier(root.id, 'ARDY continuation id'),
+    consumedFrameCount: requireInteger(root.consumedFrameCount, 'ARDY continuation consumedFrameCount', 1, 600),
   }
 }
 
@@ -128,8 +161,8 @@ function validateConstraints(value: readonly ArdyKinematicConstraint[]): readonl
     requireExactKeys(root, expectedKeys, `ARDY constraint ${index}`)
     const timeMs = requireInteger(root.timeMs, `ARDY constraint ${index}.timeMs`, 0, Number.MAX_SAFE_INTEGER)
     const joint = requireDisplayString(root.joint, `ARDY constraint ${index}.joint`, 64)
-    if (!ARDY_CORE_JOINT_NAMES.includes(joint as typeof ARDY_CORE_JOINT_NAMES[number])) {
-      throw new Error(`ARDY constraint ${index}.joint is not in CoreSkeleton27`)
+    if (!ARDY_CONSTRAINABLE_JOINT_NAMES.includes(joint as typeof ARDY_CONSTRAINABLE_JOINT_NAMES[number])) {
+      throw new Error(`ARDY constraint ${index}.joint is not supported by the ARDY condition set`)
     }
     if (root.position === undefined && root.rotation === undefined) {
       throw new Error(`ARDY constraint ${index} must contain position or rotation`)

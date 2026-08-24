@@ -96,6 +96,11 @@ export class CanonicalMotionPlayer {
     return this.#activeDescriptor
   }
 
+  /** Number of source frames that have actually been driven onto the sink. */
+  get consumedFrameCount(): number {
+    return this.#player.consumedFrameCount
+  }
+
   bind(motion: CanonicalMotion, descriptor: MotionDescriptor): void {
     if (this.#disposed) return
     validateCanonicalMotion(motion)

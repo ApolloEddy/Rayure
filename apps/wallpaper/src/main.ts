@@ -59,6 +59,7 @@ const live2dQuerySurface = live2dNativeModelUrl === undefined
     modelUrl: live2dNativeModelUrl,
     ...(live2dCoreUrl === undefined ? {} : { coreUrl: live2dCoreUrl }),
     onSnapshot: renderLive2dNativeDebug,
+    onGeneratedMotionPlayback: observation => companion.reportMotionPlayback(observation),
   })
 let live2dCompanionSurface: Live2dNativeDebugSurface | undefined
 let live2dCompanionGeneration = 0
@@ -204,6 +205,7 @@ async function handleModelAvailable(model: ModelDescriptor): Promise<void> {
         snapshot.detail,
       )
     },
+    onGeneratedMotionPlayback: observation => companion.reportMotionPlayback(observation),
   })
   live2dCompanionSurface = surface
   surface.updateMotionCatalog(live2dCompanionMotionCatalog)

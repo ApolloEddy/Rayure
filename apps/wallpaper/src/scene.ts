@@ -19,7 +19,6 @@ import {
 } from 'three'
 
 import type { AccentColor } from './config.ts'
-import { MmdModelHost } from './mmd-model-host.ts'
 import type { MmdModelLoadOutcome, MmdModelStatus } from './mmd-model-host.ts'
 import { EnvironmentHost } from './environment-host.ts'
 import type { ModelDescriptor, MotionDescriptor } from '@rayure/protocol'
@@ -43,7 +42,10 @@ export class RayureScene {
   readonly #avatar = new Group()
   readonly #placeholder = new Group()
   readonly #modelMount = new Group()
-  readonly #modelHost: MmdModelHost
+  readonly #onModelStatus: ((status: MmdModelStatus) => void) | undefined
+  #modelHost: import('./mmd-model-host.ts').MmdModelHost | undefined
+  #modelHostPromise: Promise<import('./mmd-model-host.ts').MmdModelHost | undefined> | undefined
+  #mmdMotionCatalog: readonly MotionDescriptor[] = []
   readonly #environment: EnvironmentHost
   readonly #live2dDebugProbe: Live2dDebugProbe | undefined
   readonly #live2dDebugMotion = createLive2dDebugMotion()
@@ -103,14 +105,7 @@ export class RayureScene {
     this.#avatar.add(this.#placeholder, this.#modelMount)
     this.#scene.add(this.#avatar)
 
-    this.#modelHost = new MmdModelHost(this.#modelMount, {
-      targetHeight: 2.05,
-      floorY: -1.15,
-      onStatus: (status) => {
-        if (status.phase === 'ready') this.#placeholder.visible = false
-        options.onModelStatus?.(status)
-      },
-    })
+    this.#onModelStatus = options.onModelStatus
 
     this.#live2dDebugProbe = options.live2dDebug === true
       ? new Live2dDebugProbe({ onSnapshot: options.onLive2dDebug })
@@ -173,39 +168,41 @@ export class RayureScene {
     this.#particles.visible = visible
   }
 
-  loadModel(descriptor: ModelDescriptor): Promise<MmdModelLoadOutcome> {
-    return this.#modelHost.load(descriptor)
+  async loadModel(descriptor: ModelDescriptor): Promise<MmdModelLoadOutcome> {
+    const host = await this.#ensureMmdModelHost()
+    return host?.load(descriptor) ?? 'failed'
   }
 
   updateMotionCatalog(motions: readonly MotionDescriptor[]): void {
-    this.#modelHost.updateMotionCatalog(motions)
+    this.#mmdMotionCatalog = motions
+    this.#modelHost?.updateMotionCatalog(motions)
   }
 
   playEmote(options: { emoteId: string, motionId?: string, expressionName?: string, expressionWeight?: number, durationMs?: number }): Promise<boolean> {
-    return this.#modelHost.playEmote(options)
+    return this.#modelHost?.playEmote(options) ?? Promise.resolve(false)
   }
 
   playMotion(descriptor: MotionDescriptor): Promise<boolean> {
-    return this.#modelHost.playMotion(descriptor)
+    return this.#modelHost?.playMotion(descriptor) ?? Promise.resolve(false)
   }
 
   stopMotion(motionId?: string): void {
-    this.#modelHost.stopMotion(motionId)
+    this.#modelHost?.stopMotion(motionId)
   }
 
   setExpression(name: string, weight: number, durationMs?: number): void {
-    this.#modelHost.setExpression(name, weight, durationMs)
+    this.#modelHost?.setExpression(name, weight, durationMs)
   }
 
   resetExpression(durationMs?: number): void {
-    this.#modelHost.resetExpression(durationMs)
+    this.#modelHost?.resetExpression(durationMs)
   }
 
   setAutoBlink(enabled: boolean): void {
-    this.#modelHost.setAutoBlink(enabled)
+    this.#modelHost?.setAutoBlink(enabled)
   }
 
-  get modelHost(): MmdModelHost {
+  get modelHost(): import('./mmd-model-host.ts').MmdModelHost | undefined {
     return this.#modelHost
   }
 
@@ -221,7 +218,7 @@ export class RayureScene {
     window.removeEventListener('resize', this.#resize)
     window.removeEventListener('pointermove', this.#onPointerMove)
     this.#live2dDebugProbe?.dispose()
-    this.#modelHost.dispose()
+    this.#modelHost?.dispose()
     this.#environment.dispose()
     this.#scene.traverse((node) => {
       if (node instanceof Mesh || node instanceof Points) {
@@ -241,7 +238,7 @@ export class RayureScene {
     const deltaSeconds = Math.min((timestamp - this.#lastRenderedAt) / 1000, 0.1)
     this.#lastRenderedAt = timestamp
 
-    this.#modelHost.advance(deltaSeconds, this.#pointerX, this.#pointerY)
+    this.#modelHost?.advance(deltaSeconds, this.#pointerX, this.#pointerY)
     this.#live2dDebugProbe?.advance(deltaSeconds, this.#live2dDebugMotion)
 
     this.#avatar.rotation.x += (this.#pointerY * 0.03 - this.#avatar.rotation.x) * Math.min(1, deltaSeconds * 1.5)
@@ -264,6 +261,43 @@ export class RayureScene {
   readonly #onPointerMove = (event: PointerEvent): void => {
     this.#pointerX = event.clientX / Math.max(1, window.innerWidth) * 2 - 1
     this.#pointerY = event.clientY / Math.max(1, window.innerHeight) * 2 - 1
+  }
+
+  async #ensureMmdModelHost(): Promise<import('./mmd-model-host.ts').MmdModelHost | undefined> {
+    if (this.#disposed) return undefined
+    if (this.#modelHost !== undefined) return this.#modelHost
+    if (this.#modelHostPromise !== undefined) return this.#modelHostPromise
+
+    const promise = import('./mmd-model-host.ts')
+      .then(({ MmdModelHost }) => {
+        if (this.#disposed) return undefined
+        const host = new MmdModelHost(this.#modelMount, {
+          targetHeight: 2.05,
+          floorY: -1.15,
+          onStatus: (status) => {
+            if (status.phase === 'ready') this.#placeholder.visible = false
+            this.#onModelStatus?.(status)
+          },
+        })
+        host.updateMotionCatalog(this.#mmdMotionCatalog)
+        this.#modelHost = host
+        return host
+      })
+      .catch(() => {
+        if (!this.#disposed) {
+          this.#onModelStatus?.({
+            phase: 'error',
+            detail: 'The optional 3D renderer could not be loaded.',
+          })
+        }
+        return undefined
+      })
+      .finally(() => {
+        if (this.#modelHostPromise === promise) this.#modelHostPromise = undefined
+      })
+
+    this.#modelHostPromise = promise
+    return promise
   }
 }
 

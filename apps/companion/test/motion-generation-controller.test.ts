@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import type { CanonicalJointPose, CanonicalMotion } from '@rayure/protocol'
+import type { CanonicalJointPose, CanonicalMotion, MotionDescriptor } from '@rayure/protocol'
 
 import { MotionGenerationController } from '../src/motion-generation-controller.ts'
 
@@ -50,6 +50,15 @@ interface Harness {
   statuses: Array<{ phase: string, intentId: string }>
 }
 
+function makePublishedDescriptor(input: { id: string, displayName: string }): MotionDescriptor {
+  return {
+    id: `${input.id}-published`,
+    displayName: input.displayName,
+    format: 'canonical',
+    url: `http://127.0.0.1:32145/assets/0123456789abcdef/${input.id}.json`,
+  }
+}
+
 function makeHarness(generateOverride?: (intentId: string) => Promise<CanonicalMotion>): Harness {
   const published: Array<{ id: string, displayName: string, frames: number }> = []
   const statuses: Array<{ phase: string, intentId: string }> = []
@@ -57,7 +66,7 @@ function makeHarness(generateOverride?: (intentId: string) => Promise<CanonicalM
     generate: async intent => generateOverride ? generateOverride(intent.id) : makeMotion(),
     publish: (input) => {
       published.push({ id: input.id, displayName: input.displayName, frames: input.motion.frames.length })
-      return undefined
+      return makePublishedDescriptor(input)
     },
     onStatus: (status) => statuses.push({ phase: status.phase, intentId: status.intentId }),
   })
@@ -86,27 +95,25 @@ test('runStartup publishes every preset in order', async () => {
   assert.deepEqual(published.map(p => p.id), ['idle', 'wave'])
 })
 
-test('runStartup feeds the completed segment as history to the next intent', async () => {
-  const seenHistory: Array<CanonicalMotion | undefined> = []
+test('runStartup does not fabricate unrendered history for the next preset', async () => {
+  const seenHistory: Array<{ motion: CanonicalMotion } | undefined> = []
   let generateCalls = 0
   const controller = new MotionGenerationController({
     generate: async (_intent, history) => {
       generateCalls += 1
-      seenHistory.push(history)
+      seenHistory.push(history === undefined ? undefined : { motion: history.motion })
       return makeMotion()
     },
-    publish: () => undefined,
+    publish: makePublishedDescriptor,
   })
   await controller.runStartup([
     { id: 'idle', prompt: 'stand calm' },
     { id: 'wave', prompt: 'friendly wave' },
   ])
   assert.equal(generateCalls, 2)
-  // First call has no prior segment; the second continues from the first.
+  // No segment has played at startup, so neither request has a real prefix.
   assert.equal(seenHistory[0], undefined)
-  const history = seenHistory[1]
-  assert.ok(history)
-  assert.equal(history.frames.length, 2)
+  assert.equal(seenHistory[1], undefined)
 })
 
 test('runStartup reports a failing preset and continues with the rest', async () => {
@@ -121,7 +128,7 @@ test('runStartup reports a failing preset and continues with the rest', async ()
     },
     publish: (input) => {
       published.push(input.id)
-      return undefined
+      return makePublishedDescriptor(input)
     },
     onError: (cause, intentId) => errors.push([intentId, cause instanceof Error ? cause.message : String(cause)]),
   })

@@ -9,6 +9,7 @@ import type {
 
 import type {
   ArdyKinematicConstraint,
+  ArdyMotionContinuation,
   ArdyMotionResult,
 } from './ardy-process-protocol.ts'
 import type { ArdyProcessGenerationInput } from './ardy-process-client.ts'
@@ -24,6 +25,7 @@ export interface MotionGenerationInput {
   numDenoisingSteps: number
   cfgWeight: number
   history?: CanonicalMotion
+  continuation?: ArdyMotionContinuation
   constraints?: readonly ArdyKinematicConstraint[]
   signal?: AbortSignal | undefined
 }
@@ -66,6 +68,9 @@ export class MotionGenerationService {
     requireInteger(input.numDenoisingSteps, 'Motion generation numDenoisingSteps', 1, 20)
     requireFiniteNumber(input.cfgWeight, 'Motion generation cfgWeight', 0, 20)
     if (input.history !== undefined) validateCanonicalMotion(input.history)
+    if (input.history !== undefined && input.continuation !== undefined) {
+      throw new Error('Motion generation history and continuation cannot both be supplied')
+    }
     if (input.signal?.aborted) throw new Error('Motion generation aborted')
 
     this.#active = true
@@ -83,6 +88,7 @@ export class MotionGenerationService {
         numDenoisingSteps: input.numDenoisingSteps,
         cfgWeight: input.cfgWeight,
         ...(input.history === undefined ? {} : { history: input.history }),
+        ...(input.continuation === undefined ? {} : { continuation: input.continuation }),
         ...(input.constraints === undefined ? {} : { constraints: input.constraints }),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       })

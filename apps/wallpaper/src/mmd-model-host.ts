@@ -1,4 +1,4 @@
-import { ThreeMmdLoader } from '@yohawing/three-mmd-loader'
+import { ThreeMmdLoader } from '@yohawing/three-mmd-loader/three'
 import type { ModelDescriptor, MotionDescriptor } from '@rayure/protocol'
 import {
   Bone,

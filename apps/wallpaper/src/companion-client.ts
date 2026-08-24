@@ -1,10 +1,12 @@
 import {
   createClientHello,
+  createClientMotionPlayback,
   parseServerMessage,
   serializeWireMessage,
 } from '@rayure/protocol'
 import type {
   ModelDescriptor,
+  MotionPlaybackPhase,
   MotionDescriptor,
   ServerEmotePlayMessage,
   ServerExpressionResetMessage,
@@ -23,6 +25,12 @@ export interface CompanionConnectionSnapshot {
   port: number
   attempt: number
   detail?: string
+}
+
+export interface CompanionMotionPlaybackReport {
+  motionId: string
+  phase: MotionPlaybackPhase
+  frameIndex: number
 }
 
 export interface CompanionClientOptions {
@@ -118,6 +126,33 @@ export class CompanionClient {
       port: this.#port,
       attempt: this.#attempt,
       ...(this.#detail === undefined ? {} : { detail: this.#detail }),
+    }
+  }
+
+  /**
+   * Sends renderer-observed progress for a generated motion. This is best
+   * effort by design: a reconnect must never stall rendering or replay stale
+   * telemetry against a later Companion session.
+   */
+  reportMotionPlayback(report: CompanionMotionPlaybackReport): boolean {
+    const socket = this.#socket
+    if (
+      !this.#started
+      || this.#phase !== 'connected'
+      || socket === undefined
+      || socket.readyState !== WebSocket.OPEN
+    ) return false
+    try {
+      socket.send(serializeWireMessage(createClientMotionPlayback({
+        id: this.#createId(),
+        motionId: report.motionId,
+        phase: report.phase,
+        frameIndex: report.frameIndex,
+      })))
+      return true
+    }
+    catch {
+      return false
     }
   }
 

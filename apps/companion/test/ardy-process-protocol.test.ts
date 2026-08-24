@@ -76,6 +76,48 @@ test('ARDY process protocol validates generation requests and result responses',
   assert.equal(result.motion.frames.length, 1)
 })
 
+test('ARDY process protocol carries an opaque renderer-confirmed continuation', () => {
+  const request = createArdyMotionRequest({
+    requestId: 'request-continue',
+    textFeature: makeFeature(),
+    numFrames: 40,
+    numDenoisingSteps: 4,
+    cfgWeight: 2,
+    continuation: {
+      id: 'bridge-state-1',
+      consumedFrameCount: 12,
+    },
+  })
+  assert.deepEqual(request.continuation, {
+    id: 'bridge-state-1',
+    consumedFrameCount: 12,
+  })
+
+  const result = parseArdyMotionResponse(JSON.stringify({
+    schema: ARDY_PROCESS_RESULT_SCHEMA,
+    type: 'result',
+    requestId: 'request-continue',
+    continuationId: 'bridge-state-2',
+    motion: makeRawMotion(),
+  }), 'request-continue')
+  assert.equal(result.continuationId, 'bridge-state-2')
+
+  assert.throws(() => createArdyMotionRequest({
+    requestId: 'request-conflict',
+    textFeature: makeFeature(),
+    numFrames: 40,
+    numDenoisingSteps: 4,
+    cfgWeight: 2,
+    history: parseArdyMotionResponse(JSON.stringify({
+      schema: ARDY_PROCESS_RESULT_SCHEMA,
+      type: 'result',
+      requestId: 'request-history',
+      motion: makeRawMotion(),
+    }), 'request-history').motion,
+    continuation: { id: 'bridge-state-1', consumedFrameCount: 2 },
+  }), /history.*continuation/i)
+})
+
 test('ARDY process protocol supports cancellation and structured errors', () => {
   const cancel = createArdyMotionCancel('request-1')
   assert.equal(cancel.schema, ARDY_PROCESS_REQUEST_SCHEMA)

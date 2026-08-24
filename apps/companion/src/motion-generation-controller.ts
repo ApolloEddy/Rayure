@@ -1,18 +1,21 @@
-import type { CanonicalMotion } from '@rayure/protocol'
+import type { CanonicalMotion, MotionDescriptor } from '@rayure/protocol'
 
 import type { RayureMotionGeneratePreset } from './local-config.ts'
 import { MotionScheduler } from './motion-scheduler.ts'
 import type {
   MotionScheduleIntent,
+  MotionScheduleGeneration,
+  MotionScheduleHistory,
+  MotionPlaybackObservation,
   MotionScheduleSegment,
 } from './motion-scheduler.ts'
 
 export interface MotionGenerationControllerOptions {
   generate: (
     intent: MotionScheduleIntent,
-    history: CanonicalMotion | undefined,
-  ) => Promise<CanonicalMotion>
-  publish: (input: { id: string, displayName: string, motion: CanonicalMotion }) => unknown
+    history: MotionScheduleHistory | undefined,
+  ) => Promise<CanonicalMotion | MotionScheduleGeneration>
+  publish: (input: { id: string, displayName: string, motion: CanonicalMotion }) => MotionDescriptor
   onStatus?: ((status: MotionGenerationStatus) => void) | undefined
   onError?: ((cause: unknown, intentId: string) => void) | undefined
 }
@@ -48,11 +51,12 @@ export class MotionGenerationController {
     this.#scheduler = new MotionScheduler({
       generator: options.generate,
       onSegmentReady: (segment) => {
-        this.#publish({
+        const descriptor = this.#publish({
           id: segment.intentId,
           displayName: segment.prompt,
           motion: segment.motion,
         })
+        this.#scheduler.attachPublishedSegment(segment, descriptor.id)
       },
     })
   }
@@ -63,6 +67,11 @@ export class MotionGenerationController {
 
   get currentMotion(): CanonicalMotion | undefined {
     return this.#scheduler.buffer
+  }
+
+  /** Accepts a renderer-observed prefix for the currently published segment. */
+  reportPlayback(observation: MotionPlaybackObservation): boolean {
+    return this.#scheduler.reportPlayback(observation)
   }
 
   /**
@@ -96,9 +105,9 @@ export class MotionGenerationController {
           ...(preset.numDenoisingSteps === undefined ? {} : { numDenoisingSteps: preset.numDenoisingSteps }),
           ...(preset.cfgWeight === undefined ? {} : { cfgWeight: preset.cfgWeight }),
         })
-        // Sequential presets compose: treat the completed segment as consumed
-        // history so the next preset continues from it instead of a T-pose.
-        this.#scheduler.skipToEnd()
+        // Startup has no renderer-observed playback yet. Do not fabricate a
+        // consumed pose for a subsequent preset; live re-planning obtains its
+        // prefix solely through reportPlayback().
       }
       catch (cause) {
         try {

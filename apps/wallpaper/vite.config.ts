@@ -7,6 +7,7 @@ import type { Plugin } from 'vite'
 
 const scratchRoot = fileURLToPath(new URL('../../scratch/', import.meta.url))
 const browserPathShim = fileURLToPath(new URL('./src/live2d/path-browser.ts', import.meta.url))
+const browserNodeBuiltinsShim = fileURLToPath(new URL('./src/browser-node-builtins.ts', import.meta.url))
 const sceneArchiveRoot = fileURLToPath(new URL('../../scratch/japanese_room/public-scenes-archive/', import.meta.url))
 
 const SCENE_ROUTE_PREFIX = '/assets/scenes/'
@@ -72,6 +73,11 @@ export default defineConfig({
   resolve: {
     alias: {
       path: browserPathShim,
+      // three-mmd-loader guards these dynamic imports behind a Node-runtime
+      // check.  Resolve them explicitly so Vite does not inject browser
+      // externals into the Wallpaper Engine bundle.
+      'node:fs/promises': browserNodeBuiltinsShim,
+      'node:url': browserNodeBuiltinsShim,
     },
   },
   build: {
@@ -79,6 +85,22 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: false,
     target: 'chrome100',
+    rolldownOptions: {
+      output: {
+        // Three.js is needed by the lightweight scene shell as well as the
+        // optional PMX host.  Keep it cacheable and cap its chunks below the
+        // default warning threshold instead of hiding a monolithic entry
+        // bundle behind a larger warning limit.
+        codeSplitting: {
+          groups: [{
+            name: 'three-runtime',
+            test: /node_modules[\\/]three[\\/]/u,
+            priority: 10,
+            maxSize: 420 * 1024,
+          }],
+        },
+      },
+    },
   },
   server: {
     host: '127.0.0.1',

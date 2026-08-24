@@ -196,3 +196,29 @@ test('motion generation service forwards abort signals to the backend', async ()
   await assert.rejects(pending, /abort/i)
   assert.equal(observedSignal, controller.signal)
 })
+
+test('motion generation service forwards opaque continuation state without reusing Canonical JSON history', async () => {
+  const feature = makeFeature()
+  let captured: ArdyProcessGenerationInput | undefined
+  const service = new MotionGenerationService({
+    cache: new MemoryMotionSemanticFeatureCache([feature]),
+    backend: {
+      generate: async (input) => {
+        captured = input
+        return { requestId: 'continued', motion: makeMotion(), continuationId: 'bridge-next-1' }
+      },
+    },
+  })
+
+  const result = await service.generate({
+    cacheKey: feature.cacheKey,
+    canonicalPrompt: feature.canonicalPrompt,
+    numFrames: 20,
+    numDenoisingSteps: 2,
+    cfgWeight: 1,
+    continuation: { id: 'bridge-prior-1', consumedFrameCount: 7 },
+  })
+  assert.deepEqual(captured?.continuation, { id: 'bridge-prior-1', consumedFrameCount: 7 })
+  assert.equal(captured?.history, undefined)
+  assert.equal(result.continuationId, 'bridge-next-1')
+})

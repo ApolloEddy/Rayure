@@ -113,7 +113,7 @@ test('generated motion is published and served over the loopback gateway', async
   assert.equal(published.type, 'motion.published')
   if (published.type !== 'motion.published') assert.fail('expected motion.published')
   assert.equal(published.payload.motion.format, 'canonical')
-  assert.equal(published.payload.motion.id, 'wave.casual')
+  assert.equal(published.payload.motion.id, 'wave.casual-1')
 
   const body = await (await fetch(published.payload.motion.url, { headers: { Origin: 'null' } })).json()
   assert.equal(body.schema, 'rayure.motion.v1')

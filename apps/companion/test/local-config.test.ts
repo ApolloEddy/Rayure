@@ -171,3 +171,35 @@ test('local config parses startup generate presets and requires an ardy backend'
     await assert.rejects(loadLocalConfig(configPath), /startupGenerate|array|identifier|integer|finite|fields/i)
   }
 })
+
+test('local config validates static scene entities and their ARDY coordinate transform', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'rayure-scene-config-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const configPath = join(root, 'rayure.local.json')
+  await writeFile(configPath, JSON.stringify({
+    motionSemantic: {
+      ardy: { command: 'node', args: ['ardy-bridge.mjs'] },
+      scene: {
+        transform: { origin: [10, 0, 10], scale: 0.5 },
+        entities: [{ id: 'desk', position: [14, 2, 6], headingRadians: 1.5 }],
+      },
+    },
+  }))
+  const config = await loadLocalConfig(configPath)
+  assert.deepEqual(config.motionSemantic?.scene, {
+    transform: { origin: [10, 0, 10], scale: 0.5 },
+    entities: [{ id: 'desk', position: [14, 2, 6], headingRadians: 1.5 }],
+  })
+
+  for (const scene of [
+    { entities: [{ id: 'desk', position: [0, 0] }] },
+    { entities: [{ id: 'desk', position: [0, 0, 0] }, { id: 'desk', position: [1, 0, 0] }] },
+    { transform: { scale: 0 } },
+    { entities: [{ id: 'desk', position: [0, 0, 0], extra: true }] },
+  ]) {
+    await writeFile(configPath, JSON.stringify({
+      motionSemantic: { ardy: { command: 'node', args: ['ardy-bridge.mjs'] }, scene },
+    }))
+    await assert.rejects(loadLocalConfig(configPath), /scene|vector|duplicated|scale|fields/i)
+  }
+})

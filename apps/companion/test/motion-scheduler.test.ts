@@ -4,6 +4,7 @@ import test from 'node:test'
 import type { CanonicalJointPose, CanonicalMotion } from '@rayure/protocol'
 
 import { MotionScheduler } from '../src/motion-scheduler.ts'
+import type { MotionScheduleHistory } from '../src/motion-scheduler.ts'
 
 const JOINT_NAMES = [
   'hips', 'spine', 'spine1', 'spine2', 'spine3', 'neck', 'head',
@@ -127,8 +128,34 @@ test('preempting aborts the previous intent via its cancellation signal', async 
   await assert.rejects(first, /superseded|aborted/i)
 })
 
+test('preemption aborts the signal seen by a generator even with an external caller signal', async () => {
+  const external = new AbortController()
+  let seenSignal: AbortSignal | undefined
+  const scheduler = new MotionScheduler({
+    generator: async (intent) => {
+      if (intent.id !== 'first') return makeMotion(2)
+      seenSignal = intent.signal
+      return await new Promise<CanonicalMotion>((_resolve, reject) => {
+        intent.signal?.addEventListener('abort', () => reject(new Error('first aborted')), { once: true })
+      })
+    },
+  })
+
+  const first = scheduler.solicit({ id: 'first', prompt: 'first', signal: external.signal })
+  first.catch(() => { /* expected preemption */ })
+  await Promise.resolve()
+  const second = scheduler.solicit({ id: 'second', prompt: 'second' })
+  await second
+
+  assert.ok(seenSignal)
+  assert.equal(seenSignal.aborted, true)
+  // Scheduler preemption must not mutate the caller-owned AbortController.
+  assert.equal(external.signal.aborted, false)
+  await assert.rejects(first, /superseded|aborted/i)
+})
+
 test('history continuation passes a truncated consumed motion to the next intent', async () => {
-  const seenHistory: Array<CanonicalMotion | undefined> = []
+  const seenHistory: Array<MotionScheduleHistory | undefined> = []
   const scheduler = new MotionScheduler({
     generator: async (_intent, history) => {
       seenHistory.push(history)
@@ -143,9 +170,45 @@ test('history continuation passes a truncated consumed motion to the next intent
   // The second solicitation must carry real consumed history (a truncated slice).
   const history = seenHistory[1]
   assert.ok(history)
-  assert.ok(history.frames.length > 0)
-  assert.ok(history.frames.length < 5)
-  assert.equal(history.frames[history.frames.length - 1]?.timeMs, 100)
+  assert.ok(history.motion.frames.length > 0)
+  assert.ok(history.motion.frames.length < 5)
+  assert.equal(history.consumedFrameCount, 3)
+  assert.equal(history.motion.frames[history.motion.frames.length - 1]?.timeMs, 100)
+})
+
+test('renderer progress selects the exact continuation prefix and rejects stale descriptors', async () => {
+  const seenHistory: Array<MotionScheduleHistory | undefined> = []
+  const scheduler = new MotionScheduler({
+    generator: async (intent, history) => {
+      seenHistory.push(history)
+      return {
+        motion: makeMotion(5, 50),
+        ...(intent.id === 'a' ? { continuationId: 'bridge-continuation-1' } : {}),
+      }
+    },
+  })
+  const first = await scheduler.solicit({ id: 'a', prompt: 'a' })
+  assert.equal(scheduler.attachPublishedSegment(first, 'generated-a-1'), true)
+  assert.equal(scheduler.reportPlayback({
+    motionId: 'wrong-generated-a-1',
+    phase: 'progress',
+    frameIndex: 2,
+  }), false)
+  assert.equal(scheduler.reportPlayback({
+    motionId: 'generated-a-1',
+    phase: 'progress',
+    frameIndex: 2,
+  }), true)
+  assert.equal(scheduler.reportPlayback({
+    motionId: 'generated-a-1',
+    phase: 'progress',
+    frameIndex: 1,
+  }), false)
+
+  await scheduler.solicit({ id: 'b', prompt: 'b' })
+  assert.equal(seenHistory[1]?.consumedFrameCount, 2)
+  assert.equal(seenHistory[1]?.continuationId, 'bridge-continuation-1')
+  assert.equal(seenHistory[1]?.motion.frames.length, 2)
 })
 
 test('clear invalidates the buffer and pending history', async () => {
@@ -166,4 +229,16 @@ test('solicit calls onSegmentReady after installing a segment', async () => {
   })
   await scheduler.solicit(makeIntent('idle', 'idle'))
   assert.equal(ready, 'idle')
+})
+
+test('a failed publication rolls back the unobservable segment buffer', async () => {
+  const scheduler = new MotionScheduler({
+    generator: async () => makeMotion(2),
+    onSegmentReady: () => { throw new Error('publish failed') },
+  })
+
+  await assert.rejects(scheduler.solicit(makeIntent()), /publish failed/i)
+  assert.equal(scheduler.buffer, undefined)
+  assert.equal(scheduler.isBuffering, false)
+  assert.equal(scheduler.isGenerating, false)
 })
