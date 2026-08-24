@@ -29,7 +29,7 @@ try {
     }
     Invoke-Checked 'Running tests' { pnpm test }
     Invoke-Checked 'Running TypeScript checks' { pnpm typecheck }
-    Invoke-Checked 'Compiling Python sensor and speech bridges' { python -m py_compile scripts/mediapipe-vision-bridge.py scripts/speech-bridge.py scripts/tts-bridge.py }
+    Invoke-Checked 'Compiling Python sensor and speech bridges' { python -m py_compile scripts/mediapipe-vision-bridge.py scripts/speech-bridge.py scripts/tts-bridge.py scripts/livetalker-asr-bridge.py }
     Invoke-Checked 'Building Wallpaper Engine web project' { pnpm build }
     Invoke-Checked 'Auditing production dependencies' { pnpm audit --prod --audit-level high }
 
