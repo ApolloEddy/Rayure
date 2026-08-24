@@ -14,6 +14,7 @@
 - 新增 Companion `SpeechRuntime`：把 ASR → Agent → BehaviorOrchestrator → MotionGenerationController 与 TTS 发布串成可取消、可抢占、可替换的运行时链路；提供 loopback/HTTPS Agent 适配器、包外 ASR/TTS JSONL 进程适配器和无依赖 fixture；
 - 新增 Wallpaper `SpeechPlayer` 与 Live2D speech mouth channel：按 token 化口型曲线驱动音频、`ParamMouthOpenY` 类参数并上报有界播放进度；
 - 新增 `scripts/speech-bridge.py`、`scripts/tts-bridge.py` 的无依赖模拟模式，供 CI 和切换本地小模型时复用同一 JSONL 边界；
+- 新增 `LiveTalker` HTTP 兼容适配器：将 `/api/chat` 的回复转换为 Rayure `BehaviorPlan`，将 `/api/synthesize` 的 PCM16 WAV 转换为带 RMS 口型曲线的 `TtsSynthesis`，并保持回环地址、超时和响应大小校验；
 - 新增 Renderer → Companion 的 `motion.playback` 协议回执：仅当前已发布的动作描述符可上报有界、单调的 source-frame 进度；
 - 新增 Bridge 续写令牌合同和 `SceneEntityRegistry`：场景实体坐标经显式原点/比例变换后，可作为 `Hips`、双手、双脚的 ARDY 运动学目标，而语义 cache key 保持不变；
 - Bridge 结果现在携带不透明 continuation id；真实 ARDY Core 已验证带右手约束的 8 帧生成及使用同一语义特征的连续续写；
@@ -35,7 +36,7 @@
 
 ### 验证
 
-- 协议 21 项、Companion 106 项、Wallpaper 60 项测试通过；TypeScript、三条 Python bridge 编译、生产构建、依赖审计和发布边界检查通过；
+- 协议 21 项、Companion 109 项、Wallpaper 60 项测试通过；TypeScript、三条 Python bridge 编译、生产构建、依赖审计和发布边界检查通过；
 - 发布边界仍保持：私有模型、动作、场景、缓存和本地配置不会进入 Git 或 Wallpaper `dist`。Wallpaper Engine CEF 的新生成播放视觉/DevTools 门禁仍单独保留。
 
 ## [0.6.0-dev] - 2026-08-23

@@ -40,6 +40,7 @@ export interface TtsAdapter {
   synthesize(input: {
     speechId: string
     text: string
+    emotion?: BehaviorPlan['emotion']
     signal: AbortSignal
   }): Promise<TtsSynthesis>
 }

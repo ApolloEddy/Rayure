@@ -138,6 +138,7 @@ export class SpeechRuntime {
     const synthesis = validateTtsSynthesis(await this.#tts.synthesize({
       speechId,
       text: plan.replyText,
+      ...(plan.emotion === undefined ? {} : { emotion: plan.emotion }),
       signal,
     }))
     if (signal.aborted || !isCurrent()) return
