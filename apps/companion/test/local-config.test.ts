@@ -283,6 +283,6 @@ test('local config rejects unsafe speech process settings', async (t) => {
     { speech: { enabled: true, asr: { command: 'node', args: ['x'], extra: true } } },
   ]) {
     await writeFile(configPath, JSON.stringify(value))
-    await assert.rejects(loadLocalConfig(configPath), /speech|enabled|timeout|absolute|fields/i, JSON.stringify(value))
+    await assert.rejects(loadLocalConfig(configPath), /speech|enabled|endpoint|timeout|absolute|fields/i, JSON.stringify(value))
   }
 })
