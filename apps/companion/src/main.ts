@@ -15,6 +15,7 @@ import { SpeechProcessClient } from './speech/process-client.ts'
 import { SpeechRuntime } from './speech/speech-runtime.ts'
 import { createFixtureTtsAdapter, createRuleBasedAgent } from './speech/types.ts'
 import { createHttpAgentAdapter } from './speech/agent-client.ts'
+import { createLiveTalkerAgentAdapter, createLiveTalkerTtsAdapter } from './speech/livetalker-client.ts'
 import { TtsProcessClient } from './speech/tts-process-client.ts'
 
 const DEFAULT_PORT = 32145
@@ -105,21 +106,35 @@ async function main(): Promise<void> {
       },
     })
     if (config.speech?.enabled === true) {
-      ttsProcess = config.speech.tts === undefined ? undefined : new TtsProcessClient({
+      ttsProcess = config.speech.liveTalker !== undefined || config.speech.tts === undefined ? undefined : new TtsProcessClient({
         command: config.speech.tts.command,
         args: config.speech.tts.args,
         ...(config.speech.tts.cwd === undefined ? {} : { cwd: config.speech.tts.cwd }),
         ...(config.speech.tts.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: config.speech.tts.requestTimeoutMs }),
       })
+      const liveTalker = config.speech.liveTalker
       speechRuntime = new SpeechRuntime({
         orchestrator: behavior,
-        agent: config.speech.agent === undefined
-          ? createRuleBasedAgent()
-          : createHttpAgentAdapter({
-            endpoint: config.speech.agent.endpoint,
-            ...(config.speech.agent.timeoutMs === undefined ? {} : { timeoutMs: config.speech.agent.timeoutMs }),
+        agent: liveTalker === undefined
+          ? config.speech.agent === undefined
+            ? createRuleBasedAgent()
+            : createHttpAgentAdapter({
+              endpoint: config.speech.agent.endpoint,
+              ...(config.speech.agent.timeoutMs === undefined ? {} : { timeoutMs: config.speech.agent.timeoutMs }),
+            })
+          : createLiveTalkerAgentAdapter({
+            baseUrl: liveTalker.baseUrl,
+            ...(liveTalker.timeoutMs === undefined ? {} : { timeoutMs: liveTalker.timeoutMs }),
+            ...(liveTalker.language === undefined ? {} : { language: liveTalker.language }),
+            ...(liveTalker.motionByKeyword === undefined ? {} : { motionByKeyword: liveTalker.motionByKeyword }),
           }),
-        tts: ttsProcess ?? createFixtureTtsAdapter(),
+        tts: liveTalker === undefined
+          ? ttsProcess ?? createFixtureTtsAdapter()
+          : createLiveTalkerTtsAdapter({
+            baseUrl: liveTalker.baseUrl,
+            ...(liveTalker.timeoutMs === undefined ? {} : { timeoutMs: liveTalker.timeoutMs }),
+            ...(liveTalker.language === undefined ? {} : { language: liveTalker.language }),
+          }),
         ...(controller === undefined ? {} : { controller }),
         ...(config.motionSemantic?.startupGenerate === undefined ? {} : { presets: config.motionSemantic.startupGenerate }),
         publishSpeech: input => server.publishSpeech({

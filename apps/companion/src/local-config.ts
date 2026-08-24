@@ -27,6 +27,12 @@ import {
 } from './speech/process-client.ts'
 import { validateAgentEndpoint, validateAgentTimeout } from './speech/agent-client.ts'
 import {
+  validateLiveTalkerBaseUrl,
+  validateLiveTalkerLanguage,
+  validateLiveTalkerMotionByKeyword,
+  validateLiveTalkerTimeout,
+} from './speech/livetalker-client.ts'
+import {
   validateTtsProcessArgs,
   validateTtsProcessCommand,
   validateTtsProcessCwd,
@@ -45,6 +51,12 @@ export interface RayureLocalConfig {
 
 export interface RayureSpeechConfig {
   enabled: boolean
+  liveTalker?: {
+    baseUrl: string
+    timeoutMs?: number | undefined
+    language?: string | undefined
+    motionByKeyword?: Readonly<Record<string, string>> | undefined
+  } | undefined
   agent?: {
     endpoint: string
     timeoutMs?: number | undefined
@@ -242,14 +254,24 @@ export async function loadLocalConfig(
 function resolveSpeechConfig(value: unknown): RayureSpeechConfig {
   const root = requireRecord(value, 'speech config')
   const allowedKeys = ['enabled']
+  if (root.liveTalker !== undefined) allowedKeys.push('liveTalker')
   if (root.agent !== undefined) allowedKeys.push('agent')
   if (root.tts !== undefined) allowedKeys.push('tts')
   if (root.asr !== undefined) allowedKeys.push('asr')
   requireExactKeys(root, allowedKeys, 'speech config')
   if (typeof root.enabled !== 'boolean') throw new Error('speech enabled must be boolean')
+  if (root.liveTalker !== undefined && (root.agent !== undefined || root.tts !== undefined)) {
+    throw new Error('speech liveTalker cannot be combined with agent or tts')
+  }
+  const liveTalker = root.liveTalker === undefined ? undefined : resolveLiveTalkerConfig(root.liveTalker)
   const agent = root.agent === undefined ? undefined : resolveSpeechAgentConfig(root.agent)
   const tts = root.tts === undefined ? undefined : resolveSpeechTtsConfig(root.tts)
-  if (root.asr === undefined) return { enabled: root.enabled, ...(agent === undefined ? {} : { agent }), ...(tts === undefined ? {} : { tts }) }
+  if (root.asr === undefined) return {
+    enabled: root.enabled,
+    ...(liveTalker === undefined ? {} : { liveTalker }),
+    ...(agent === undefined ? {} : { agent }),
+    ...(tts === undefined ? {} : { tts }),
+  }
   const asrRoot = requireRecord(root.asr, 'speech asr config')
   const asrKeys = ['command', 'args']
   if (asrRoot.cwd !== undefined) asrKeys.push('cwd')
@@ -258,6 +280,7 @@ function resolveSpeechConfig(value: unknown): RayureSpeechConfig {
   if (!Array.isArray(asrRoot.args)) throw new Error('speech asr args must be an array')
   return {
     enabled: root.enabled,
+    ...(liveTalker === undefined ? {} : { liveTalker }),
     ...(agent === undefined ? {} : { agent }),
     ...(tts === undefined ? {} : { tts }),
     asr: {
@@ -266,6 +289,21 @@ function resolveSpeechConfig(value: unknown): RayureSpeechConfig {
       ...(asrRoot.cwd === undefined ? {} : { cwd: validateSpeechProcessCwd(asrRoot.cwd) }),
       ...(asrRoot.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: validateSpeechProcessTimeout(asrRoot.startupTimeoutMs) }),
     },
+  }
+}
+
+function resolveLiveTalkerConfig(value: unknown): NonNullable<RayureSpeechConfig['liveTalker']> {
+  const root = requireRecord(value, 'speech liveTalker config')
+  const allowedKeys = ['baseUrl']
+  if (root.timeoutMs !== undefined) allowedKeys.push('timeoutMs')
+  if (root.language !== undefined) allowedKeys.push('language')
+  if (root.motionByKeyword !== undefined) allowedKeys.push('motionByKeyword')
+  requireExactKeys(root, allowedKeys, 'speech liveTalker config')
+  return {
+    baseUrl: validateLiveTalkerBaseUrl(root.baseUrl),
+    ...(root.timeoutMs === undefined ? {} : { timeoutMs: validateLiveTalkerTimeout(root.timeoutMs) }),
+    ...(root.language === undefined ? {} : { language: validateLiveTalkerLanguage(root.language) }),
+    ...(root.motionByKeyword === undefined ? {} : { motionByKeyword: validateLiveTalkerMotionByKeyword(root.motionByKeyword) }),
   }
 }
 

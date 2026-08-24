@@ -137,6 +137,18 @@ export function validateLiveTalkerTimeout(value: unknown): number {
   return value as number
 }
 
+export function validateLiveTalkerLanguage(value: unknown): string {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 32 || value.trim() !== value || /[\u0000-\u001F\u007F]/u.test(value)) {
+    throw new Error('LiveTalker language must be a trimmed printable string up to 32 characters')
+  }
+  return value
+}
+
+export function validateLiveTalkerMotionByKeyword(value: unknown): Readonly<Record<string, string>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('LiveTalker motionByKeyword must be an object')
+  return normalizeMotionMap(value as Readonly<Record<string, string>>)
+}
+
 export function parseLiveTalkerChatResponse(raw: string): string {
   let value: unknown
   try { value = JSON.parse(raw) } catch { throw new Error('LiveTalker chat response must be valid JSON') }

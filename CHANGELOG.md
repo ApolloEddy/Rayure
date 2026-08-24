@@ -15,6 +15,7 @@
 - 新增 Wallpaper `SpeechPlayer` 与 Live2D speech mouth channel：按 token 化口型曲线驱动音频、`ParamMouthOpenY` 类参数并上报有界播放进度；
 - 新增 `scripts/speech-bridge.py`、`scripts/tts-bridge.py` 的无依赖模拟模式，供 CI 和切换本地小模型时复用同一 JSONL 边界；
 - 新增 `LiveTalker` HTTP 兼容适配器：将 `/api/chat` 的回复转换为 Rayure `BehaviorPlan`，将 `/api/synthesize` 的 PCM16 WAV 转换为带 RMS 口型曲线的 `TtsSynthesis`，并保持回环地址、超时和响应大小校验；
+- 新增 `speech.liveTalker` 本地配置与 Companion 接线：配置后由 LiveTalker 提供 Agent/TTS，仍可独立配置 ASR JSONL Bridge；LiveTalker 与旧的 Agent/TTS provider 配置互斥，避免运行时选路歧义；
 - 新增 Renderer → Companion 的 `motion.playback` 协议回执：仅当前已发布的动作描述符可上报有界、单调的 source-frame 进度；
 - 新增 Bridge 续写令牌合同和 `SceneEntityRegistry`：场景实体坐标经显式原点/比例变换后，可作为 `Hips`、双手、双脚的 ARDY 运动学目标，而语义 cache key 保持不变；
 - Bridge 结果现在携带不透明 continuation id；真实 ARDY Core 已验证带右手约束的 8 帧生成及使用同一语义特征的连续续写；
