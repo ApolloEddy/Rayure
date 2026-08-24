@@ -36,7 +36,7 @@ Agent 计划中的 replyText -> TTS（fixture 或包外 JSONL 小模型）
 - **语音事件**：`SpeechRuntime` 支持 `globalThis.rayureSpeech.submitText(...)` 和包外 ASR JSONL；Agent 可用 loopback/HTTPS HTTP adapter 替换；TTS 可用 fixture 或包外 JSONL；所有 provider 调用具备 signal/generation 抢占边界。
 - **音频与口型**：Companion 只发布 token 化音频和 `rayure.mouth-cues.v1` 曲线；Wallpaper `SpeechPlayer` 驱动 `ParamMouthOpenY` 类参数并回报 `speech.playback`。
 
-`CHANGELOG.md` 已记录 2026-08-24 的未发布变更（最新开发基线为 `0.6.0-dev`，此前的 3D 记录为 0.4.8），根工作区 manifest 仍为 0.2.0。本仓库应视为开发快照。当前统一验证 186 项测试（协议 21、Companion 105、Wallpaper 60）、TypeScript、Python bridge 编译、生产构建与发布边界审计全部通过。
+`CHANGELOG.md` 已记录 2026-08-24 的未发布变更（最新开发基线为 `0.6.0-dev`，此前的 3D 记录为 0.4.8），根工作区 manifest 仍为 0.2.0。本仓库应视为开发快照。当前统一验证 187 项测试（协议 21、Companion 106、Wallpaper 60）、TypeScript、Python bridge 编译、生产构建与发布边界审计全部通过。
 
 ## 已实现
 
