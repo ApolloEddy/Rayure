@@ -91,6 +91,7 @@ async function main(): Promise<void> {
     controller = createGenerationController(config, server, motionSemanticRuntime, sceneEntities)
     if (controller !== undefined) {
       await controller.runStartup(config.motionSemantic?.startupGenerate ?? [])
+      controller.startIdlePool()
       // Expose the live entry point so a future ASR/LLM behavior layer can call
       // submitIntent() at runtime; absent without a configured ARDY backend.
       ;(globalThis as { rayureMotionGeneration?: MotionGenerationController }).rayureMotionGeneration = controller
@@ -229,6 +230,19 @@ function createGenerationController(
       }
     },
     publish: input => server.publishMotion(input),
+    ...(config.motionSemantic?.idlePool === undefined
+      ? {}
+      : {
+          idlePool: {
+            actions: config.motionSemantic.idlePool.actions,
+            ...(config.motionSemantic.idlePool.lookaheadMs === undefined
+              ? {}
+              : { lookaheadMs: config.motionSemantic.idlePool.lookaheadMs }),
+            ...(config.motionSemantic.idlePool.handoffMs === undefined
+              ? {}
+              : { handoffMs: config.motionSemantic.idlePool.handoffMs }),
+          },
+        }),
     onError: (cause, intentId) => {
       const message = cause instanceof Error ? cause.message : String(cause)
       process.stderr.write(`${JSON.stringify({ event: 'motion.generate.error', intentId, message })}\n`)

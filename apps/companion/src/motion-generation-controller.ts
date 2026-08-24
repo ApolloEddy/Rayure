@@ -9,6 +9,8 @@ import type {
   MotionPlaybackObservation,
   MotionScheduleSegment,
 } from './motion-scheduler.ts'
+import { MotionIdlePool } from './motion-idle-pool.ts'
+import type { MotionIdleAction } from './motion-idle-pool.ts'
 
 export interface MotionGenerationControllerOptions {
   generate: (
@@ -18,6 +20,11 @@ export interface MotionGenerationControllerOptions {
   publish: (input: { id: string, displayName: string, motion: CanonicalMotion }) => MotionDescriptor
   onStatus?: ((status: MotionGenerationStatus) => void) | undefined
   onError?: ((cause: unknown, intentId: string) => void) | undefined
+  idlePool?: {
+    actions: readonly MotionIdleAction[]
+    lookaheadMs?: number | undefined
+    handoffMs?: number | undefined
+  } | undefined
 }
 
 export interface MotionGenerationStatus {
@@ -43,6 +50,7 @@ export class MotionGenerationController {
   readonly #publish: MotionGenerationControllerOptions['publish']
   readonly #onStatus: MotionGenerationControllerOptions['onStatus']
   readonly #onError: MotionGenerationControllerOptions['onError']
+  readonly #idlePool: MotionIdlePool | undefined
 
   constructor(options: MotionGenerationControllerOptions) {
     this.#publish = options.publish
@@ -59,6 +67,15 @@ export class MotionGenerationController {
         this.#scheduler.attachPublishedSegment(segment, descriptor.id)
       },
     })
+    this.#idlePool = options.idlePool === undefined
+      ? undefined
+      : new MotionIdlePool({
+        ...options.idlePool,
+        prefetch: intent => this.#scheduler.prefetch(intent),
+        commit: () => this.#scheduler.commitPrefetch(),
+        discard: () => this.#scheduler.discardPrefetch(),
+        onError: (cause, intentId) => this.#onError?.(cause, intentId),
+      })
   }
 
   get isGenerating(): boolean {
@@ -71,7 +88,15 @@ export class MotionGenerationController {
 
   /** Accepts a renderer-observed prefix for the currently published segment. */
   reportPlayback(observation: MotionPlaybackObservation): boolean {
-    return this.#scheduler.reportPlayback(observation)
+    const accepted = this.#scheduler.reportPlayback(observation)
+    if (accepted) {
+      this.#idlePool?.observe({
+        intentId: this.#scheduler.currentSegment?.intentId ?? '',
+        phase: observation.phase,
+        remainingMs: this.#scheduler.remainingMs,
+      })
+    }
+    return accepted
   }
 
   /**
@@ -80,14 +105,23 @@ export class MotionGenerationController {
    * winning segment is installed and published (or rejects if superseded).
    */
   submitIntent(intent: MotionScheduleIntent): Promise<MotionScheduleSegment> {
+    this.#idlePool?.interrupt()
     this.#onStatus?.({ intentId: intent.id, phase: 'generating' })
     return this.#scheduler.solicit(intent).then((segment) => {
+      this.#idlePool?.adoptCurrent(segment.intentId)
       this.#onStatus?.({ intentId: segment.intentId, phase: 'ready' })
       return segment
     }).catch((cause: unknown) => {
       this.#onStatus?.({ intentId: intent.id, phase: 'superseded' })
       throw cause
     })
+  }
+
+  /** Starts idle-pool planning after startup or after a direct action is done. */
+  startIdlePool(): void {
+    const currentIntentId = this.#scheduler.currentSegment?.intentId
+    if (currentIntentId !== undefined && this.#idlePool?.adoptCurrent(currentIntentId)) return
+    if (currentIntentId === undefined) this.#idlePool?.prime()
   }
 
   /**
@@ -121,6 +155,7 @@ export class MotionGenerationController {
   }
 
   dispose(): void {
+    this.#idlePool?.interrupt()
     this.#scheduler.dispose()
   }
 }

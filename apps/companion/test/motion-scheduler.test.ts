@@ -242,3 +242,52 @@ test('a failed publication rolls back the unobservable segment buffer', async ()
   assert.equal(scheduler.isBuffering, false)
   assert.equal(scheduler.isGenerating, false)
 })
+
+test('prefetch keeps the current segment installed until an explicit commit', async () => {
+  const published: string[] = []
+  const scheduler = new MotionScheduler({
+    generator: async intent => makeMotion(intent.id === 'current' ? 5 : 2),
+    onSegmentReady: segment => {
+      published.push(segment.intentId)
+      scheduler.attachPublishedSegment(segment, `${segment.intentId}-published`)
+    },
+  })
+
+  const current = await scheduler.solicit({ id: 'current', prompt: 'current' })
+  assert.equal(scheduler.currentSegment, current)
+  assert.equal(scheduler.remainingMs, 200)
+  scheduler.reportPlayback({ motionId: 'current-published', phase: 'progress', frameIndex: 3 })
+  assert.equal(scheduler.remainingMs, 100)
+
+  const prefetched = await scheduler.prefetch({ id: 'next', prompt: 'next' })
+  assert.equal(prefetched.intentId, 'next')
+  assert.equal(scheduler.currentSegment, current)
+  assert.equal(scheduler.prefetchedSegment, prefetched)
+  assert.deepEqual(published, ['current'])
+
+  assert.equal(scheduler.commitPrefetch(), true)
+  assert.equal(scheduler.currentSegment, prefetched)
+  assert.equal(scheduler.hasPrefetchedSegment, false)
+  assert.deepEqual(published, ['current', 'next'])
+})
+
+test('discarding a prefetch aborts it without touching the current buffer', async () => {
+  let rejectPrefetch!: (cause: Error) => void
+  const scheduler = new MotionScheduler({
+    generator: async intent => {
+      if (intent.id === 'next') {
+        return await new Promise<CanonicalMotion>((_resolve, reject) => { rejectPrefetch = reject })
+      }
+      return makeMotion(2)
+    },
+  })
+  const current = await scheduler.solicit({ id: 'current', prompt: 'current' })
+  const pending = scheduler.prefetch({ id: 'next', prompt: 'next' })
+  await Promise.resolve()
+  scheduler.discardPrefetch()
+  rejectPrefetch(new Error('next aborted'))
+  await assert.rejects(pending, /aborted|superseded/i)
+  assert.equal(scheduler.currentSegment, current)
+  assert.equal(scheduler.hasPrefetchedSegment, false)
+  assert.equal(scheduler.isGenerating, false)
+})

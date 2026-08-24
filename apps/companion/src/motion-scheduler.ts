@@ -47,6 +47,14 @@ export interface MotionSchedulerOptions {
   onSegmentReady?: ((segment: MotionScheduleSegment) => void) | undefined
 }
 
+interface MotionSchedulerState {
+  buffer: CanonicalMotion | undefined
+  bufferSegment: MotionScheduleSegment | undefined
+  publishedMotionId: string | undefined
+  lastConsumedMs: number
+  lastConsumedFrameCount: number
+}
+
 export interface MotionPlaybackObservation {
   motionId: string
   phase: MotionPlaybackPhase
@@ -65,10 +73,13 @@ export class MotionScheduler {
   readonly #consumers = new Set<(frame: CanonicalMotionFrame, segment: MotionScheduleSegment) => void>()
   #buffer: CanonicalMotion | undefined
   #bufferSegment: MotionScheduleSegment | undefined
+  #prefetchedSegment: MotionScheduleSegment | undefined
   #publishedMotionId: string | undefined
   #lastConsumedMs = -1
   #lastConsumedFrameCount = 0
   #activeController: AbortController | undefined
+  #activePromise: Promise<MotionScheduleSegment> | undefined
+  #activeKind: 'current' | 'prefetch' | undefined
   #tail: Promise<unknown> = Promise.resolve()
   #active = false
   #segmentId = 0
@@ -84,6 +95,28 @@ export class MotionScheduler {
 
   get buffer(): CanonicalMotion | undefined {
     return this.#buffer
+  }
+
+  get currentSegment(): MotionScheduleSegment | undefined {
+    return this.#bufferSegment
+  }
+
+  get hasPrefetchedSegment(): boolean {
+    return this.#prefetchedSegment !== undefined
+  }
+
+  get prefetchedSegment(): MotionScheduleSegment | undefined {
+    return this.#prefetchedSegment
+  }
+
+  /** Remaining source time based only on renderer-confirmed playback. */
+  get remainingMs(): number | undefined {
+    const buffer = this.#buffer
+    if (buffer === undefined || buffer.frames.length === 0) return undefined
+    const lastFrame = buffer.frames[buffer.frames.length - 1]
+    if (lastFrame === undefined) return undefined
+    const consumedMs = this.#lastConsumedFrameCount === 0 ? 0 : Math.max(0, this.#lastConsumedMs)
+    return Math.max(0, lastFrame.timeMs - consumedMs)
   }
 
   get isGenerating(): boolean {
@@ -131,10 +164,73 @@ export class MotionScheduler {
    * the generator, including when the caller supplied an external signal.
    */
   solicit(intent: MotionScheduleIntent): Promise<MotionScheduleSegment> {
+    this.#prefetchedSegment = undefined
+    return this.#startGeneration(intent, 'current').then(segment => {
+      this.#installAndPublish(segment)
+      return segment
+    })
+  }
+
+  /**
+   * Generates a segment against the currently consumed history without
+   * replacing the renderer's current buffer. A later commitPrefetch() performs
+   * the publish/install handoff. A direct solicit() cancels this work.
+   */
+  prefetch(intent: MotionScheduleIntent): Promise<MotionScheduleSegment> {
+    if (this.#activeKind === 'current') {
+      return Promise.reject(new Error('Motion scheduler is busy with a current segment'))
+    }
+    if (this.#activeKind === 'prefetch' && this.#activePromise !== undefined) {
+      return this.#activePromise
+    }
+    const task = this.#startGeneration(intent, 'prefetch').then(segment => {
+      if (this.#prefetchedSegment === undefined) this.#prefetchedSegment = segment
+      return segment
+    })
+    this.#activePromise = task
+    return task
+  }
+
+  /** Installs and publishes the prepared segment, preserving the old state on publication failure. */
+  commitPrefetch(): boolean {
+    const segment = this.#prefetchedSegment
+    if (segment === undefined) return false
+    const previous = this.#captureState()
+    this.#prefetchedSegment = undefined
+    this.#installBuffer(segment.motion, segment)
+    try {
+      this.#onSegmentReady?.(segment)
+      return true
+    }
+    catch (cause) {
+      this.#restoreState(previous)
+      this.#prefetchedSegment = segment
+      throw cause
+    }
+  }
+
+  /** Cancels any pending prefetch without touching the current rendered segment. */
+  discardPrefetch(): void {
+    if (this.#activeKind === 'prefetch') {
+      this.#segmentId += 1
+      this.#activeController?.abort()
+      this.#active = false
+      this.#activeController = undefined
+      this.#activePromise = undefined
+      this.#activeKind = undefined
+    }
+    this.#prefetchedSegment = undefined
+  }
+
+  #startGeneration(
+    intent: MotionScheduleIntent,
+    kind: 'current' | 'prefetch',
+  ): Promise<MotionScheduleSegment> {
     const segmentId = ++this.#segmentId
     const controller = new AbortController()
     this.#activeController?.abort()
     this.#activeController = controller
+    this.#activeKind = kind
     this.#active = true
     const linked = linkSignals(controller.signal, intent.signal)
     const history = this.#consumedHistory()
@@ -145,35 +241,28 @@ export class MotionScheduler {
     })
     this.#tail = task.catch(() => { /* tail is only a sequencing barrier */ })
 
-    return task.then((output) => {
+    const result = task.then((output) => {
       if (this.#segmentId !== segmentId || linked.signal.aborted) {
         throw new Error('Motion scheduler segment was superseded')
       }
       const generated = normalizeGeneration(output)
-      const segment: MotionScheduleSegment = {
+      return {
         intentId: intent.id,
         prompt: intent.prompt,
         motion: generated.motion,
         ...(generated.continuationId === undefined ? {} : { continuationId: generated.continuationId }),
       }
-      this.#installBuffer(generated.motion, segment)
-      try {
-        this.#onSegmentReady?.(segment)
-      }
-      catch (cause) {
-        // Publishing is part of installation: an unannounced buffer cannot
-        // receive renderer telemetry and must never become continuation input.
-        if (this.#bufferSegment === segment) this.#discardInstalledBuffer()
-        throw cause
-      }
-      return segment
     }).finally(() => {
       linked.dispose()
       if (this.#segmentId === segmentId) {
         this.#active = false
         this.#activeController = undefined
+        this.#activePromise = undefined
+        this.#activeKind = undefined
       }
     })
+    this.#activePromise = result
+    return result
   }
 
   /**
@@ -212,8 +301,11 @@ export class MotionScheduler {
     this.#segmentId += 1
     this.#activeController?.abort()
     this.#activeController = undefined
+    this.#activePromise = undefined
+    this.#activeKind = undefined
     this.#buffer = undefined
     this.#bufferSegment = undefined
+    this.#prefetchedSegment = undefined
     this.#publishedMotionId = undefined
     this.#lastConsumedMs = -1
     this.#lastConsumedFrameCount = 0
@@ -232,12 +324,34 @@ export class MotionScheduler {
     this.#lastConsumedFrameCount = 0
   }
 
-  #discardInstalledBuffer(): void {
-    this.#buffer = undefined
-    this.#bufferSegment = undefined
-    this.#publishedMotionId = undefined
-    this.#lastConsumedMs = -1
-    this.#lastConsumedFrameCount = 0
+  #installAndPublish(segment: MotionScheduleSegment): void {
+    const previous = this.#captureState()
+    this.#installBuffer(segment.motion, segment)
+    try {
+      this.#onSegmentReady?.(segment)
+    }
+    catch (cause) {
+      this.#restoreState(previous)
+      throw cause
+    }
+  }
+
+  #captureState(): MotionSchedulerState {
+    return {
+      buffer: this.#buffer,
+      bufferSegment: this.#bufferSegment,
+      publishedMotionId: this.#publishedMotionId,
+      lastConsumedMs: this.#lastConsumedMs,
+      lastConsumedFrameCount: this.#lastConsumedFrameCount,
+    }
+  }
+
+  #restoreState(state: MotionSchedulerState): void {
+    this.#buffer = state.buffer
+    this.#bufferSegment = state.bufferSegment
+    this.#publishedMotionId = state.publishedMotionId
+    this.#lastConsumedMs = state.lastConsumedMs
+    this.#lastConsumedFrameCount = state.lastConsumedFrameCount
   }
 
   #consumedHistory(): MotionScheduleHistory | undefined {

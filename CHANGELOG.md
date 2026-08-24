@@ -21,10 +21,14 @@
 - 新增 Bridge 续写令牌合同和 `SceneEntityRegistry`：场景实体坐标经显式原点/比例变换后，可作为 `Hips`、双手、双脚的 ARDY 运动学目标，而语义 cache key 保持不变；
 - Bridge 结果现在携带不透明 continuation id；真实 ARDY Core 已验证带右手约束的 8 帧生成及使用同一语义特征的连续续写；
 - 新增生成动作根位移的 2D 画布投影、Hiyori `ParamLeg` 步态映射，以及 20 fps Canonical Motion 的帧间 lerp/slerp；
+- 新增 `MotionIdlePool` 与 `motionSemantic.idlePool` 配置：按 round-robin 选择待机动作，在 lookahead 窗口预取下一段，并在 handoff 窗口提交；直接语音/视觉动作会取消过期预取；
+- 新增 `MotionScheduler.prefetch()` / `commitPrefetch()` / `discardPrefetch()`：预取段不覆盖当前播放 buffer，发布失败时恢复已确认的当前段；晚加入的 Wallpaper 客户端会收到最近一次 `motion.published`；
+- 新增 Renderer `parameter-crossfade` 工具及测试：生成 Canonical Motion 交接从当前真实参数姿态平滑过渡，默认 180 ms；
 
 ### 变更
 
 - `MotionScheduler` 生产路径不再自行伪造时钟：下一段只使用 Renderer 已确认的前缀；抢占会取消生成器实际收到的 signal，发布回调失败会回滚未观察 buffer；
+- `MotionScheduler` 现在把预测生成和交接提交分离；待机池只在剩余时间进入 lookahead/handoff 窗口后生成/发布，避免预取结果提前打断当前动作；
 - Live2D 的 native motion、generated Canonical Motion 和 debug fixture 改为互斥参数写入者。生成开始从当前参数 180 ms 混合，结束/取消后优先恢复原生 Idle；一次性 Idle 结束时会经防抖保护重新进入默认待机；
 - Bridge 使用 ARDY 官方 `Root2DConstraintSet` / `EndEffectorConstraintSet` 生成 `observed_motion` 与 `motion_mask`，并为 EndEffector 条件补齐必需的 `Hips` 行；
 - 冻结的 PMX/MMD 主机按需加载；`three-mmd-loader` 的 Node-only 可选分支改为显式浏览器诊断 stub，生产构建不再出现 browser-external 告警，最大 JS 分块降至 380 kB；
@@ -39,7 +43,7 @@
 
 ### 验证
 
-- 协议 21 项、Companion 109 项、Wallpaper 60 项测试通过；TypeScript、四条 Python bridge 编译、生产构建、依赖审计和发布边界检查通过；
+- 协议 21 项、Companion 118 项、Wallpaper 62 项测试通过；TypeScript、四条 Python bridge 编译、生产构建、依赖审计和发布边界检查通过；
 - 发布边界仍保持：私有模型、动作、场景、缓存和本地配置不会进入 Git 或 Wallpaper `dist`。Wallpaper Engine CEF 的新生成播放视觉/DevTools 门禁仍单独保留。
 
 ## [0.6.0-dev] - 2026-08-23

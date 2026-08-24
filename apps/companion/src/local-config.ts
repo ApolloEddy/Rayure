@@ -112,7 +112,14 @@ export interface RayureMotionSemanticConfig {
     requestTimeoutMs: number
   } | undefined
   startupGenerate?: readonly RayureMotionGeneratePreset[] | undefined
+  idlePool?: RayureMotionIdlePoolConfig | undefined
   scene?: RayureMotionSceneConfig | undefined
+}
+
+export interface RayureMotionIdlePoolConfig {
+  actions: readonly RayureMotionGeneratePreset[]
+  lookaheadMs?: number | undefined
+  handoffMs?: number | undefined
 }
 
 export interface RayureMotionSceneConfig {
@@ -393,6 +400,7 @@ function resolveMotionSemanticConfig(value: unknown): RayureMotionSemanticConfig
   if (root.textEncoder !== undefined) allowedKeys.push('textEncoder')
   if (root.ardy !== undefined) allowedKeys.push('ardy')
   if (root.startupGenerate !== undefined) allowedKeys.push('startupGenerate')
+  if (root.idlePool !== undefined) allowedKeys.push('idlePool')
   if (root.scene !== undefined) allowedKeys.push('scene')
   requireExactKeys(root, allowedKeys, 'motionSemantic config')
   if (allowedKeys.length === 0) throw new Error('motionSemantic config must define cachePath or textEncoder')
@@ -421,6 +429,10 @@ function resolveMotionSemanticConfig(value: unknown): RayureMotionSemanticConfig
     startupGenerate = resolveStartupGenerate(root.startupGenerate)
   }
 
+  const idlePool = root.idlePool === undefined
+    ? undefined
+    : resolveIdlePoolConfig(root.idlePool, ardy !== undefined)
+
   const scene = root.scene === undefined ? undefined : resolveSceneConfig(root.scene)
 
   return {
@@ -428,7 +440,32 @@ function resolveMotionSemanticConfig(value: unknown): RayureMotionSemanticConfig
     ...(textEncoder === undefined ? {} : { textEncoder }),
     ...(ardy === undefined ? {} : { ardy }),
     ...(startupGenerate === undefined ? {} : { startupGenerate }),
+    ...(idlePool === undefined ? {} : { idlePool }),
     ...(scene === undefined ? {} : { scene }),
+  }
+}
+
+function resolveIdlePoolConfig(value: unknown, hasArdy: boolean): RayureMotionIdlePoolConfig {
+  if (!hasArdy) throw new Error('motionSemantic idlePool requires a configured ardy backend')
+  const root = requireRecord(value, 'motionSemantic idlePool')
+  const allowedKeys = ['actions']
+  if (root.lookaheadMs !== undefined) allowedKeys.push('lookaheadMs')
+  if (root.handoffMs !== undefined) allowedKeys.push('handoffMs')
+  requireExactKeys(root, allowedKeys, 'motionSemantic idlePool')
+  const actions = resolveStartupGenerate(root.actions)
+  const lookaheadMs = root.lookaheadMs === undefined
+    ? undefined
+    : requireGenerateInteger(root.lookaheadMs, 'motionSemantic idlePool lookaheadMs', 0, 60_000)
+  const handoffMs = root.handoffMs === undefined
+    ? undefined
+    : requireGenerateInteger(root.handoffMs, 'motionSemantic idlePool handoffMs', 0, 60_000)
+  if (lookaheadMs !== undefined && handoffMs !== undefined && handoffMs > lookaheadMs) {
+    throw new Error('motionSemantic idlePool handoffMs must not exceed lookaheadMs')
+  }
+  return {
+    actions,
+    ...(lookaheadMs === undefined ? {} : { lookaheadMs }),
+    ...(handoffMs === undefined ? {} : { handoffMs }),
   }
 }
 

@@ -180,3 +180,38 @@ test('isGenerating tracks an in-flight intent', async () => {
   await pending
   assert.equal(controller.isGenerating, false)
 })
+
+test('idle pool generates ahead of the handoff and publishes only at the crossfade window', async () => {
+  const published: string[] = []
+  const generated: string[] = []
+  const controller = new MotionGenerationController({
+    generate: async intent => {
+      generated.push(intent.id)
+      return makeMotion()
+    },
+    publish: (input) => {
+      published.push(input.id)
+      return makePublishedDescriptor(input)
+    },
+    idlePool: {
+      actions: [
+        { id: 'idle-a', prompt: 'breathe calmly' },
+        { id: 'idle-b', prompt: 'shift weight' },
+      ],
+      lookaheadMs: 100,
+      handoffMs: 60,
+    },
+  })
+
+  await controller.submitIntent({ id: 'idle-a', prompt: 'breathe calmly' })
+  assert.deepEqual(published, ['idle-a'])
+  assert.deepEqual(generated, ['idle-a'])
+
+  controller.reportPlayback({ motionId: 'idle-a-published', phase: 'progress', frameIndex: 1 })
+  // The prefetch promise is asynchronous, but the current segment remains live
+  // until the promise resolves and the handoff is explicitly committed.
+  assert.deepEqual(published, ['idle-a'])
+  await new Promise<void>(resolve => setImmediate(resolve))
+  assert.deepEqual(generated, ['idle-a', 'idle-b'])
+  assert.deepEqual(published, ['idle-a', 'idle-b'])
+})

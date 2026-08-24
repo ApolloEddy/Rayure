@@ -33,6 +33,7 @@ flowchart LR
 - 2D/3D 模型、场景、灯光和相机；
 - 帧循环、Wallpaper Engine FPS 限制与暂停；
 - 表情、口型、动作混合和本地鼠标交互；
+- 生成动作交接时以当前参数姿态执行短 crossfade，避免待机片段之间的参数跳变；
 - 将 Companion 的语义动作映射为当前模型能力。
 
 不负责：
@@ -49,6 +50,7 @@ flowchart LR
 - 仅监听 `127.0.0.1` 的本地通信；
 - 会话、能力授权、超时、重连和动作仲裁；
 - ASR、LLM、TTS 与视觉供应商适配；
+- ARDY 动作的语义缓存、continuation、预测预取和 idle action pool；
 - Windows 权限与本地资源访问；
 - 将原始传感器数据收敛成最小派生事件。
 
@@ -109,6 +111,17 @@ Companion reads ignored Live2D model3 config
   → failed/superseded surfaces dispose canvas, model and motion controller
 ```
 
+### ARDY 连续动作链路
+
+```text
+Renderer motion.playback 确认已消费帧
+  → MotionScheduler 截取真实 continuation history
+  → IdleMotionPool 在 lookahead 窗口预取下一待机动作
+  → 预取段停留在独立 buffer，不抢占当前动作
+  → 进入 handoff 窗口后 commitPrefetch + motion.published
+  → Wallpaper 以当前参数姿态做 crossfade，再驱动下一段 Canonical Motion
+```
+
 ### 目标语音链路
 
 ```text
@@ -145,7 +158,7 @@ Companion reads ignored Live2D model3 config
 
 1. **M0 独立基础**：离线壁纸壳、回环 Companion、严格握手协议；
 2. **M1 PMX 角色基础**：官方项目清单、外置只读 PMX、事务加载、CEF 实机和属性热更新；
-3. **M1.1 角色行为**：Idle、表情、鼠标注视、动作格式与完整资源释放；
+3. **M1.1 角色行为**：Idle、idle action pool、表情、鼠标注视、动作格式与完整资源释放；
 4. **M2 语音闭环**：ASR → Agent → TTS → 口型/动作；
 5. **M3 本地视觉**：presence/head/gesture 派生事件与权限控制；
 6. **M4 2D 与资产系统**：2D Adapter、模型导入、授权与打包门禁；

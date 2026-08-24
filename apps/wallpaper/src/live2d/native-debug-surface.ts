@@ -18,6 +18,11 @@ import { Live2dMotionController } from './motion-controller.ts'
 import type { Live2dMotionModelLike } from './motion-controller.ts'
 import { Live2dMotionPlayer } from './motion-player.ts'
 import type { Live2dParameterSink } from './rig-profile.ts'
+import {
+  createParameterCrossfade,
+  sampleParameterCrossfade,
+} from './parameter-crossfade.ts'
+import type { ParameterCrossfade } from './parameter-crossfade.ts'
 
 const coreScriptLoads = new Map<string, Promise<void>>()
 const GENERATED_MOTION_BLEND_MS = 180
@@ -90,7 +95,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
   #parameters = new Map<string, number>()
   #motionCatalog: readonly Live2dMotionDescriptor[] = []
   #parameterOwner: 'none' | 'native' | 'generated' | 'debug' = 'none'
-  #parameterBlend: { startedAtMs: number, values: ReadonlyMap<string, number> } | undefined
+  #parameterBlend: ParameterCrossfade | undefined
   #idleRestorePending = false
   #lastGeneratedPlayback: { motionId: string, frameIndex: number } | undefined
   #generatedRootOrigin: CanonicalVector3 | undefined
@@ -260,10 +265,11 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
     this.#nativeMotion.stopMotion()
     this.#player?.stop()
     this.#parameterOwner = 'generated'
-    this.#parameterBlend = {
-      startedAtMs: performance.now(),
-      values: this.#captureParameterValues(),
-    }
+    this.#parameterBlend = createParameterCrossfade(
+      this.#captureParameterValues(),
+      performance.now(),
+      GENERATED_MOTION_BLEND_MS,
+    )
     this.#lastGeneratedPlayback = undefined
     this.#generatedRootOrigin = undefined
     this.#generatedRootAnchorOffset = { ...this.#canvasMotionOffset }
@@ -334,13 +340,11 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
   #blendGeneratedParameter(parameterId: string, target: number): number {
     const blend = this.#parameterBlend
     if (blend === undefined) return target
-    const alpha = Math.min(1, Math.max(0, (performance.now() - blend.startedAtMs) / GENERATED_MOTION_BLEND_MS))
-    if (alpha >= 1) {
+    const sample = sampleParameterCrossfade(blend, parameterId, target, performance.now())
+    if (sample.done) {
       this.#parameterBlend = undefined
-      return target
     }
-    const source = blend.values.get(parameterId)
-    return source === undefined ? target : source + (target - source) * alpha
+    return sample.value
   }
 
   #applyGeneratedRootPosition(rootPosition: CanonicalVector3): void {

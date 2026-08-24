@@ -172,6 +172,7 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
   const assetTokenMap = new Map<string, PreparedAsset>()
   const generatedTokenMap = new Map<string, PreparedGeneratedMotion>()
   const speechTokenMap = new Map<string, PreparedSpeech>()
+  let latestGeneratedMotion: { descriptor: MotionDescriptor, serialized: string } | undefined
   let generatedMotionSequence = 0
   let speechSequence = 0
   let startPromise: Promise<CompanionServerAddress> | undefined
@@ -201,6 +202,7 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
       assetTokenMap.clear()
       generatedTokenMap.clear()
       speechTokenMap.clear()
+      latestGeneratedMotion = undefined
       generatedMotionSequence = 0
       speechSequence = 0
       preparedModel = options.model === undefined
@@ -387,6 +389,9 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
           })))
         }
 
+        const latest = latestGeneratedMotion
+        if (latest !== undefined) outbound.push(latest.serialized)
+
         for (const payload of outbound) socket.send(payload)
         welcomedClients.add(socket)
       }
@@ -468,6 +473,7 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
       assetTokenMap.clear()
       generatedTokenMap.clear()
       speechTokenMap.clear()
+      latestGeneratedMotion = undefined
       speechSequence = 0
       stopPromise = undefined
     }
@@ -526,6 +532,7 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
       id: createId(),
       motion: descriptor,
     }))
+    latestGeneratedMotion = { descriptor, serialized }
     for (const socket of welcomedClients) {
       if (socket.readyState === WebSocket.OPEN) {
         try {

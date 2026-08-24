@@ -172,6 +172,50 @@ test('local config parses startup generate presets and requires an ardy backend'
   }
 })
 
+test('local config parses an ARDY idle pool and validates the replan windows', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'rayure-idle-config-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const configPath = join(root, 'rayure.local.json')
+  const ardy = { command: 'node', args: ['ardy-bridge.mjs'] }
+
+  await writeFile(configPath, JSON.stringify({
+    motionSemantic: {
+      ardy,
+      idlePool: {
+        actions: [
+          { id: 'idle-breathe', prompt: 'breathe calmly', numFrames: 80 },
+          { id: 'idle-shift', prompt: 'shift weight naturally' },
+        ],
+        lookaheadMs: 1_000,
+        handoffMs: 180,
+      },
+    },
+  }))
+  const config = await loadLocalConfig(configPath)
+  assert.deepEqual(config.motionSemantic?.idlePool, {
+    actions: [
+      { id: 'idle-breathe', prompt: 'breathe calmly', numFrames: 80 },
+      { id: 'idle-shift', prompt: 'shift weight naturally' },
+    ],
+    lookaheadMs: 1_000,
+    handoffMs: 180,
+  })
+
+  for (const idlePool of [
+    { actions: [] },
+    { actions: [{ id: 'idle', prompt: 'stand' }], handoffMs: 2_000, lookaheadMs: 1_000 },
+    { actions: [{ id: 'idle', prompt: 'stand', extra: true }] },
+  ]) {
+    await writeFile(configPath, JSON.stringify({ motionSemantic: { ardy, idlePool } }))
+    await assert.rejects(loadLocalConfig(configPath), /idlePool|handoff|startupGenerate|array|fields/i)
+  }
+
+  await writeFile(configPath, JSON.stringify({
+    motionSemantic: { idlePool: { actions: [{ id: 'idle', prompt: 'stand' }] } },
+  }))
+  await assert.rejects(loadLocalConfig(configPath), /ardy/i)
+})
+
 test('local config validates static scene entities and their ARDY coordinate transform', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'rayure-scene-config-'))
   t.after(() => rm(root, { recursive: true, force: true }))

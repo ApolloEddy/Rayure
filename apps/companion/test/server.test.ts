@@ -433,6 +433,35 @@ test('publishMotion announces the descriptor and serves the generated frame memo
   assert.equal((await fetch(wrongPath, { headers: { Origin: 'null' } })).status, 404)
 })
 
+test('a renderer joining after startup receives the latest generated motion', async (t) => {
+  const server = createCompanionServer({ port: 0, helloTimeoutMs: 1000 })
+  const address = await server.start()
+  t.after(() => server.stop())
+  const published = server.publishMotion({
+    id: 'startup-idle',
+    displayName: 'Startup Idle',
+    motion: makeGeneratedMotion(),
+  })
+
+  const socket = new WebSocket(`ws://${address.host}:${address.port}/ws`)
+  t.after(() => socket.close())
+  await once(socket, 'open')
+  const received: string[] = []
+  const messages = new Promise<void>(resolve => {
+    socket.on('message', data => {
+      received.push(data.toString())
+      if (received.length === 2) resolve()
+    })
+  })
+  socket.send(JSON.stringify(createClientHello({ id: 'hello-late', build: 'test' })))
+  await messages
+  assert.equal(parseServerMessage(received[0]!).type, 'server.welcome')
+  const replay = parseServerMessage(received[1]!)
+  assert.equal(replay.type, 'motion.published')
+  if (replay.type !== 'motion.published') assert.fail('expected replayed motion.published')
+  assert.equal(replay.payload.motion.url, published.url)
+})
+
 test('publishMotion requires a running server and rejects invalid motion ids', async (t) => {
   const server = createCompanionServer({ port: 0 })
   assert.throws(() => server.publishMotion({
