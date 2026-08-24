@@ -19,6 +19,19 @@ import {
   validateVisionProcessCommand,
   validateVisionProcessCwd,
 } from './vision-process-client.ts'
+import {
+  validateSpeechProcessArgs,
+  validateSpeechProcessCommand,
+  validateSpeechProcessCwd,
+  validateSpeechProcessTimeout,
+} from './speech/process-client.ts'
+import { validateAgentEndpoint, validateAgentTimeout } from './speech/agent-client.ts'
+import {
+  validateTtsProcessArgs,
+  validateTtsProcessCommand,
+  validateTtsProcessCwd,
+  validateTtsProcessTimeout,
+} from './speech/tts-process-client.ts'
 
 const MAX_LOCAL_CONFIG_BYTES = 64 * 1024
 
@@ -27,6 +40,27 @@ export interface RayureLocalConfig {
   motions?: readonly CompanionMotionSource[] | undefined
   motionSemantic?: RayureMotionSemanticConfig | undefined
   vision?: RayureVisionConfig | undefined
+  speech?: RayureSpeechConfig | undefined
+}
+
+export interface RayureSpeechConfig {
+  enabled: boolean
+  agent?: {
+    endpoint: string
+    timeoutMs?: number | undefined
+  } | undefined
+  tts?: {
+    command: string
+    args: readonly string[]
+    cwd?: string | undefined
+    requestTimeoutMs?: number | undefined
+  } | undefined
+  asr?: {
+    command: string
+    args: readonly string[]
+    cwd?: string | undefined
+    startupTimeoutMs?: number | undefined
+  } | undefined
 }
 
 export const visionActionTypes = [
@@ -126,6 +160,7 @@ export async function loadLocalConfig(
   if (root.motions !== undefined) allowedKeys.push('motions')
   if (root.motionSemantic !== undefined) allowedKeys.push('motionSemantic')
   if (root.vision !== undefined) allowedKeys.push('vision')
+  if (root.speech !== undefined) allowedKeys.push('speech')
   requireExactKeys(root, allowedKeys, 'Rayure local config')
 
   let resolvedModel: CompanionModelSource | undefined
@@ -193,12 +228,70 @@ export async function loadLocalConfig(
     ? undefined
     : resolveMotionSemanticConfig(root.motionSemantic)
   const vision = root.vision === undefined ? undefined : resolveVisionConfig(root.vision)
+  const speech = root.speech === undefined ? undefined : resolveSpeechConfig(root.speech)
 
   return {
     ...(resolvedModel ? { model: resolvedModel } : {}),
     ...(resolvedMotions ? { motions: resolvedMotions } : {}),
     ...(motionSemantic ? { motionSemantic } : {}),
     ...(vision ? { vision } : {}),
+    ...(speech ? { speech } : {}),
+  }
+}
+
+function resolveSpeechConfig(value: unknown): RayureSpeechConfig {
+  const root = requireRecord(value, 'speech config')
+  const allowedKeys = ['enabled']
+  if (root.agent !== undefined) allowedKeys.push('agent')
+  if (root.tts !== undefined) allowedKeys.push('tts')
+  if (root.asr !== undefined) allowedKeys.push('asr')
+  requireExactKeys(root, allowedKeys, 'speech config')
+  if (typeof root.enabled !== 'boolean') throw new Error('speech enabled must be boolean')
+  const agent = root.agent === undefined ? undefined : resolveSpeechAgentConfig(root.agent)
+  const tts = root.tts === undefined ? undefined : resolveSpeechTtsConfig(root.tts)
+  if (root.asr === undefined) return { enabled: root.enabled, ...(agent === undefined ? {} : { agent }), ...(tts === undefined ? {} : { tts }) }
+  const asrRoot = requireRecord(root.asr, 'speech asr config')
+  const asrKeys = ['command', 'args']
+  if (asrRoot.cwd !== undefined) asrKeys.push('cwd')
+  if (asrRoot.startupTimeoutMs !== undefined) asrKeys.push('startupTimeoutMs')
+  requireExactKeys(asrRoot, asrKeys, 'speech asr config')
+  if (!Array.isArray(asrRoot.args)) throw new Error('speech asr args must be an array')
+  return {
+    enabled: root.enabled,
+    ...(agent === undefined ? {} : { agent }),
+    ...(tts === undefined ? {} : { tts }),
+    asr: {
+      command: validateSpeechProcessCommand(asrRoot.command),
+      args: validateSpeechProcessArgs(asrRoot.args),
+      ...(asrRoot.cwd === undefined ? {} : { cwd: validateSpeechProcessCwd(asrRoot.cwd) }),
+      ...(asrRoot.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: validateSpeechProcessTimeout(asrRoot.startupTimeoutMs) }),
+    },
+  }
+}
+
+function resolveSpeechTtsConfig(value: unknown): NonNullable<RayureSpeechConfig['tts']> {
+  const root = requireRecord(value, 'speech tts config')
+  const allowedKeys = ['command', 'args']
+  if (root.cwd !== undefined) allowedKeys.push('cwd')
+  if (root.requestTimeoutMs !== undefined) allowedKeys.push('requestTimeoutMs')
+  requireExactKeys(root, allowedKeys, 'speech tts config')
+  if (!Array.isArray(root.args)) throw new Error('speech tts args must be an array')
+  return {
+    command: validateTtsProcessCommand(root.command),
+    args: validateTtsProcessArgs(root.args),
+    ...(root.cwd === undefined ? {} : { cwd: validateTtsProcessCwd(root.cwd) }),
+    ...(root.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: validateTtsProcessTimeout(root.requestTimeoutMs) }),
+  }
+}
+
+function resolveSpeechAgentConfig(value: unknown): NonNullable<RayureSpeechConfig['agent']> {
+  const root = requireRecord(value, 'speech agent config')
+  const allowedKeys = ['endpoint']
+  if (root.timeoutMs !== undefined) allowedKeys.push('timeoutMs')
+  requireExactKeys(root, allowedKeys, 'speech agent config')
+  return {
+    endpoint: validateAgentEndpoint(root.endpoint),
+    ...(root.timeoutMs === undefined ? {} : { timeoutMs: validateAgentTimeout(root.timeoutMs) }),
   }
 }
 

@@ -11,6 +11,11 @@ import { SceneEntityRegistry } from './scene-entity-registry.ts'
 import { createCompanionServer } from './server.ts'
 import type { CompanionServer } from './server.ts'
 import { VisionRuntime } from './vision-runtime.ts'
+import { SpeechProcessClient } from './speech/process-client.ts'
+import { SpeechRuntime } from './speech/speech-runtime.ts'
+import { createFixtureTtsAdapter, createRuleBasedAgent } from './speech/types.ts'
+import { createHttpAgentAdapter } from './speech/agent-client.ts'
+import { TtsProcessClient } from './speech/tts-process-client.ts'
 
 const DEFAULT_PORT = 32145
 
@@ -54,6 +59,9 @@ async function main(): Promise<void> {
     },
   })
   let visionRuntime: VisionRuntime | undefined
+  let speechRuntime: SpeechRuntime | undefined
+  let speechProcess: SpeechProcessClient | undefined
+  let ttsProcess: TtsProcessClient | undefined
   try {
     const address = await server.start()
     process.stdout.write(`${JSON.stringify({
@@ -64,6 +72,7 @@ async function main(): Promise<void> {
       motionSemanticEncoderAvailable: motionSemanticRuntime.resolver !== undefined,
       ardyAvailable: motionSemanticRuntime.ardy !== undefined,
       visionEnabled: config.vision?.enabled === true,
+      speechEnabled: config.speech?.enabled === true,
     })}\n`)
 
     let stopping = false
@@ -71,7 +80,7 @@ async function main(): Promise<void> {
       if (stopping) return
       stopping = true
       process.stderr.write(`${JSON.stringify({ event: 'companion.stopping', signal })}\n`)
-      await Promise.all([server.stop(), motionSemanticRuntime.close(), visionRuntime?.close()])
+      await Promise.all([server.stop(), motionSemanticRuntime.close(), visionRuntime?.close(), speechProcess?.close(), ttsProcess?.close()])
       behavior.close()
     }
 
@@ -95,8 +104,59 @@ async function main(): Promise<void> {
         process.stderr.write(`${JSON.stringify({ event: 'vision.error', message: cause.message })}\n`)
       },
     })
+    if (config.speech?.enabled === true) {
+      ttsProcess = config.speech.tts === undefined ? undefined : new TtsProcessClient({
+        command: config.speech.tts.command,
+        args: config.speech.tts.args,
+        ...(config.speech.tts.cwd === undefined ? {} : { cwd: config.speech.tts.cwd }),
+        ...(config.speech.tts.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: config.speech.tts.requestTimeoutMs }),
+      })
+      speechRuntime = new SpeechRuntime({
+        orchestrator: behavior,
+        agent: config.speech.agent === undefined
+          ? createRuleBasedAgent()
+          : createHttpAgentAdapter({
+            endpoint: config.speech.agent.endpoint,
+            ...(config.speech.agent.timeoutMs === undefined ? {} : { timeoutMs: config.speech.agent.timeoutMs }),
+          }),
+        tts: ttsProcess ?? createFixtureTtsAdapter(),
+        ...(controller === undefined ? {} : { controller }),
+        ...(config.motionSemantic?.startupGenerate === undefined ? {} : { presets: config.motionSemantic.startupGenerate }),
+        publishSpeech: input => server.publishSpeech({
+          id: input.id,
+          displayName: input.displayName.slice(0, 96),
+          mimeType: input.synthesis.mimeType,
+          audio: input.synthesis.audio,
+          durationMs: input.synthesis.durationMs,
+          cues: input.synthesis.cues,
+        }),
+        onError: cause => {
+          process.stderr.write(`${JSON.stringify({ event: 'speech.error', message: cause.message })}\n`)
+        },
+      })
+      ;(globalThis as { rayureSpeech?: SpeechRuntime }).rayureSpeech = speechRuntime
+      const asr = config.speech.asr
+      if (asr !== undefined) {
+        speechProcess = new SpeechProcessClient({
+          command: asr.command,
+          args: asr.args,
+          ...(asr.cwd === undefined ? {} : { cwd: asr.cwd }),
+          ...(asr.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: asr.startupTimeoutMs }),
+          onTranscript: transcript => {
+            const result = speechRuntime?.submitTranscript(transcript)
+            if (result === 'ignored' || result === 'expired') {
+              process.stderr.write(`${JSON.stringify({ event: 'speech.turn.ignored', turnId: transcript.turnId, result })}\n`)
+            }
+          },
+          onError: cause => {
+            process.stderr.write(`${JSON.stringify({ event: 'speech.process.error', message: cause.message })}\n`)
+          },
+        })
+      }
+    }
   }
   catch (cause) {
+    await Promise.all([speechProcess?.close(), ttsProcess?.close()])
     behavior.close()
     await visionRuntime?.close()
     await motionSemanticRuntime.close()

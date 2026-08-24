@@ -449,3 +449,42 @@ test('publishMotion requires a running server and rejects invalid motion ids', a
     motion: makeGeneratedMotion(),
   }), /identifier/i)
 })
+
+test('publishSpeech announces tokenized audio and mouth cues', async (t) => {
+  const server = createCompanionServer({ port: 0, helloTimeoutMs: 1000 })
+  const address = await server.start()
+  t.after(() => server.stop())
+
+  const socket = new WebSocket(`ws://${address.host}:${address.port}/ws`)
+  t.after(() => socket.close())
+  await once(socket, 'open')
+  socket.send(JSON.stringify(createClientHello({ id: 'hello-speech', build: 'test' })))
+  await once(socket, 'message')
+
+  const published = server.publishSpeech({
+    id: 'reply',
+    displayName: 'Hello',
+    mimeType: 'audio/wav',
+    audio: new Uint8Array([82, 73, 70, 70]),
+    durationMs: 400,
+    cues: [{ timeMs: 0, value: 0.2 }, { timeMs: 200, value: 0.8 }],
+  })
+  assert.equal(published.id, 'reply-1')
+  const [data] = await once(socket, 'message')
+  const message = parseServerMessage(data!.toString())
+  assert.equal(message.type, 'speech.published')
+  if (message.type !== 'speech.published') assert.fail('expected speech.published')
+  assert.equal(message.payload.speech.audioUrl, published.audioUrl)
+
+  const audio = await fetch(published.audioUrl, { headers: { Origin: 'null' } })
+  assert.equal(audio.status, 200)
+  assert.equal(audio.headers.get('content-type'), 'audio/wav')
+  assert.deepEqual([...new Uint8Array(await audio.arrayBuffer())], [82, 73, 70, 70])
+  const cues = await fetch(published.cuesUrl, { headers: { Origin: 'null' } })
+  assert.equal(cues.status, 200)
+  assert.deepEqual(await cues.json(), {
+    version: 'rayure.mouth-cues.v1',
+    durationMs: 400,
+    cues: [{ timeMs: 0, value: 0.2 }, { timeMs: 200, value: 0.8 }],
+  })
+})

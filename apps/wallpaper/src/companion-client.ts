@@ -1,6 +1,7 @@
 import {
   createClientHello,
   createClientMotionPlayback,
+  createClientSpeechPlayback,
   parseServerMessage,
   serializeWireMessage,
 } from '@rayure/protocol'
@@ -8,6 +9,8 @@ import type {
   ModelDescriptor,
   MotionPlaybackPhase,
   MotionDescriptor,
+  SpeechDescriptor,
+  SpeechPlaybackPhase,
   ServerEmotePlayMessage,
   ServerExpressionResetMessage,
   ServerExpressionSetMessage,
@@ -33,6 +36,12 @@ export interface CompanionMotionPlaybackReport {
   frameIndex: number
 }
 
+export interface CompanionSpeechPlaybackReport {
+  speechId: string
+  phase: SpeechPlaybackPhase
+  timeMs: number
+}
+
 export interface CompanionClientOptions {
   port: number
   build: string
@@ -40,6 +49,7 @@ export interface CompanionClientOptions {
   onModelAvailable?: (model: ModelDescriptor) => void
   onMotionCatalog?: (motions: readonly MotionDescriptor[]) => void
   onMotionPublished?: (motion: MotionDescriptor) => void
+  onSpeechPublished?: (speech: SpeechDescriptor) => void
   onMotionPlay?: (motion: MotionDescriptor) => void
   onMotionStop?: (motionId?: string) => void
   onExpressionSet?: (payload: ServerExpressionSetMessage['payload']) => void
@@ -59,6 +69,7 @@ export class CompanionClient {
   readonly #onModelAvailable: ((model: ModelDescriptor) => void) | undefined
   readonly #onMotionCatalog: ((motions: readonly MotionDescriptor[]) => void) | undefined
   readonly #onMotionPublished: ((motion: MotionDescriptor) => void) | undefined
+  readonly #onSpeechPublished: ((speech: SpeechDescriptor) => void) | undefined
   readonly #onMotionPlay: ((motion: MotionDescriptor) => void) | undefined
   readonly #onMotionStop: ((motionId?: string) => void) | undefined
   readonly #onExpressionSet: ((payload: ServerExpressionSetMessage['payload']) => void) | undefined
@@ -82,6 +93,7 @@ export class CompanionClient {
     this.#onModelAvailable = options.onModelAvailable
     this.#onMotionCatalog = options.onMotionCatalog
     this.#onMotionPublished = options.onMotionPublished
+    this.#onSpeechPublished = options.onSpeechPublished
     this.#onMotionPlay = options.onMotionPlay
     this.#onMotionStop = options.onMotionStop
     this.#onExpressionSet = options.onExpressionSet
@@ -148,6 +160,24 @@ export class CompanionClient {
         motionId: report.motionId,
         phase: report.phase,
         frameIndex: report.frameIndex,
+      })))
+      return true
+    }
+    catch {
+      return false
+    }
+  }
+
+  /** Best-effort renderer telemetry for a tokenized speech resource. */
+  reportSpeechPlayback(report: CompanionSpeechPlaybackReport): boolean {
+    const socket = this.#socket
+    if (!this.#started || this.#phase !== 'connected' || socket === undefined || socket.readyState !== WebSocket.OPEN) return false
+    try {
+      socket.send(serializeWireMessage(createClientSpeechPlayback({
+        id: this.#createId(),
+        speechId: report.speechId,
+        phase: report.phase,
+        timeMs: report.timeMs,
       })))
       return true
     }
@@ -240,6 +270,17 @@ export class CompanionClient {
           if (!welcomed) throw new Error('Companion published motion before completing the handshake')
           try {
             this.#onMotionPublished?.(message.payload.motion)
+          }
+          catch {
+            // Transport lifecycle isolation.
+          }
+          return
+        }
+
+        if (message.type === 'speech.published') {
+          if (!welcomed) throw new Error('Companion published speech before completing the handshake')
+          try {
+            this.#onSpeechPublished?.(message.payload.speech)
           }
           catch {
             // Transport lifecycle isolation.

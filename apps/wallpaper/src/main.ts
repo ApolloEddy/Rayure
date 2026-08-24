@@ -1,6 +1,6 @@
 import './style.css'
 
-import type { CanonicalMotion, Live2dMotionDescriptor, ModelDescriptor, MotionDescriptor } from '@rayure/protocol'
+import type { CanonicalMotion, Live2dMotionDescriptor, ModelDescriptor, MotionDescriptor, SpeechDescriptor } from '@rayure/protocol'
 import { CompanionClient } from './companion-client.ts'
 import { loadCanonicalMotion } from './live2d/canonical-motion-client.ts'
 import type { CompanionConnectionSnapshot } from './companion-client.ts'
@@ -22,6 +22,7 @@ import {
 import type { Live2dNativeDebugSnapshot } from './live2d/native-debug-surface.ts'
 import { resolveLive2dCoreUrl } from './live2d/core-source.ts'
 import type { WallpaperPropertyListener } from './wallpaper-api.ts'
+import { SpeechPlayer } from './speech-player.ts'
 
 const BUILD = '0.2.0-m1'
 const stage = requireElement('stage')
@@ -66,6 +67,8 @@ let live2dCompanionGeneration = 0
 let live2dCompanionModel: ModelDescriptor | undefined
 let live2dCompanionMotionCatalog: readonly Live2dMotionDescriptor[] = []
 let pendingLive2dMotion: Live2dMotionDescriptor | undefined
+let speechPublishedGeneration = 0
+let speechPlayer: SpeechPlayer | undefined
 void live2dQuerySurface?.start()
 
 const companion = new CompanionClient({
@@ -83,6 +86,9 @@ const companion = new CompanionClient({
   },
   onMotionPublished: (motion) => {
     void handleMotionPublished(motion)
+  },
+  onSpeechPublished: (speech) => {
+    void handleSpeechPublished(speech)
   },
   onEmotePlay: (payload) => {
     if (live2dCompanionModel?.format === 'live2d') {
@@ -165,6 +171,9 @@ companion.start()
 
 window.addEventListener('beforeunload', () => {
   companion.stop()
+  speechPublishedGeneration += 1
+  speechPlayer?.dispose()
+  speechPlayer = undefined
   live2dCompanionGeneration += 1
   live2dQuerySurface?.dispose()
   live2dCompanionSurface?.dispose()
@@ -254,6 +263,26 @@ async function handleMotionPublished(motion: MotionDescriptor): Promise<void> {
   }
   if (generation !== motionPublishedGeneration) return
   live2dCompanionSurface.playGeneratedMotion(canonical, motion)
+}
+
+async function handleSpeechPublished(speech: SpeechDescriptor): Promise<void> {
+  const generation = ++speechPublishedGeneration
+  speechPlayer?.dispose()
+  const player = new SpeechPlayer({
+    descriptor: speech,
+    onMouthValue: value => {
+      live2dCompanionSurface?.setSpeechMouthValue(value)
+      live2dQuerySurface?.setSpeechMouthValue(value)
+    },
+    onPlayback: report => companion.reportSpeechPlayback(report),
+  })
+  speechPlayer = player
+  const started = await player.start()
+  if (generation !== speechPublishedGeneration) {
+    player.dispose()
+    return
+  }
+  if (!started) speechPlayer = undefined
 }
 
 function renderConnectionStatus(snapshot: CompanionConnectionSnapshot): void {

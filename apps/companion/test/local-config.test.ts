@@ -246,3 +246,43 @@ test('local config rejects unsafe or ambiguous vision settings', async (t) => {
     await assert.rejects(loadLocalConfig(configPath), /vision|enabled|modelPath|reserved|fps|action|camera/i, JSON.stringify(value))
   }
 })
+
+test('local config resolves opt-in speech and keeps ASR process settings explicit', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'rayure-speech-config-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const configPath = join(root, 'rayure.local.json')
+  await writeFile(configPath, JSON.stringify({
+    speech: {
+      enabled: true,
+      agent: { endpoint: 'http://127.0.0.1:8123/agent', timeoutMs: 5000 },
+      tts: { command: process.execPath, args: ['tts-bridge.js', '--simulate'], requestTimeoutMs: 5000 },
+      asr: { command: process.execPath, args: ['speech-bridge.js', '--simulate'], startupTimeoutMs: 5000 },
+    },
+  }))
+  const config = await loadLocalConfig(configPath)
+  assert.deepEqual(config.speech, {
+    enabled: true,
+    agent: { endpoint: 'http://127.0.0.1:8123/agent', timeoutMs: 5000 },
+    tts: { command: process.execPath, args: ['tts-bridge.js', '--simulate'], requestTimeoutMs: 5000 },
+    asr: { command: process.execPath, args: ['speech-bridge.js', '--simulate'], startupTimeoutMs: 5000 },
+  })
+})
+
+test('local config rejects unsafe speech process settings', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'rayure-speech-config-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const configPath = join(root, 'rayure.local.json')
+  for (const value of [
+    { speech: { enabled: 'yes' } },
+    { speech: { enabled: true, extra: true } },
+    { speech: { enabled: true, agent: { endpoint: 'https://example.com/agent?secret=1' } } },
+    { speech: { enabled: true, agent: { endpoint: 'https://example.com/agent', timeoutMs: 1 } } },
+    { speech: { enabled: true, tts: { command: 'node', args: ['x'], requestTimeoutMs: 1 } } },
+    { speech: { enabled: true, asr: { command: 'node', args: ['x'], startupTimeoutMs: 1 } } },
+    { speech: { enabled: true, asr: { command: 'node', args: ['x'], cwd: 'relative' } } },
+    { speech: { enabled: true, asr: { command: 'node', args: ['x'], extra: true } } },
+  ]) {
+    await writeFile(configPath, JSON.stringify(value))
+    await assert.rejects(loadLocalConfig(configPath), /speech|enabled|timeout|absolute|fields/i, JSON.stringify(value))
+  }
+})

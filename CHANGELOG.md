@@ -10,6 +10,10 @@
 - 新增 `rayure.vision-observation.v1` 派生观察合同与 `VisionEventDetector`：在 Companion 内以迟滞、连续帧和冷却窗口识别 presence、头部方向、举手和挥手，不接收原始摄像头帧；
 - 新增 `VisionProcessClient` 与 `scripts/mediapipe-vision-bridge.py`：Bridge 使用 `shell:false`、16 KiB 行上限、受限诊断和失败关闭；Python 侧提供无依赖 `--simulate` 回归模式，并以 MediaPipe LIVE_STREAM 读取包外模型和摄像头后只输出派生观察；
 - 新增视觉运行时配置、`VisionBehaviorPolicy` 与 `VisionRuntime`：将受 allowlist 约束的视觉事件接入 BehaviorOrchestrator 和 MotionGenerationController，支持独立模拟 Bridge 启动/关闭与模型、摄像头、帧率参数校验；
+- 新增 `rayure.speech` 传输合同：ASR 最终转录、Agent 结构化计划、token 化 `speech.published` 音频/口型曲线和 Renderer `speech.playback` 回执均严格校验，原始音频不进入 websocket；
+- 新增 Companion `SpeechRuntime`：把 ASR → Agent → BehaviorOrchestrator → MotionGenerationController 与 TTS 发布串成可取消、可抢占、可替换的运行时链路；提供 loopback/HTTPS Agent 适配器、包外 ASR/TTS JSONL 进程适配器和无依赖 fixture；
+- 新增 Wallpaper `SpeechPlayer` 与 Live2D speech mouth channel：按 token 化口型曲线驱动音频、`ParamMouthOpenY` 类参数并上报有界播放进度；
+- 新增 `scripts/speech-bridge.py`、`scripts/tts-bridge.py` 的无依赖模拟模式，供 CI 和切换本地小模型时复用同一 JSONL 边界；
 - 新增 Renderer → Companion 的 `motion.playback` 协议回执：仅当前已发布的动作描述符可上报有界、单调的 source-frame 进度；
 - 新增 Bridge 续写令牌合同和 `SceneEntityRegistry`：场景实体坐标经显式原点/比例变换后，可作为 `Hips`、双手、双脚的 ARDY 运动学目标，而语义 cache key 保持不变；
 - Bridge 结果现在携带不透明 continuation id；真实 ARDY Core 已验证带右手约束的 8 帧生成及使用同一语义特征的连续续写；

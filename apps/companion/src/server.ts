@@ -14,9 +14,11 @@ import {
   createServerModelAvailable,
   createServerMotionCatalog,
   createServerMotionPublished,
+  createServerSpeechPublished,
   createServerWelcome,
   parseClientMessage,
   serializeWireMessage,
+  speechAudioMimeTypes,
   validateCanonicalMotion,
 } from '@rayure/protocol'
 import type {
@@ -24,7 +26,9 @@ import type {
   ClientMotionPlaybackMessage,
   Live2dMotionDescriptor,
   MotionDescriptor,
+  MouthCueTrack,
 } from '@rayure/protocol'
+import type { MouthCue, SpeechAudioMimeType, SpeechDescriptor } from '@rayure/protocol'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { RawData } from 'ws'
 
@@ -37,6 +41,9 @@ const DEFAULT_PORT = 32145
 const DEFAULT_HELLO_TIMEOUT_MS = 5_000
 const MAX_ASSET_BYTES = 256 * 1024 * 1024
 const MAX_GENERATED_MOTIONS = 64
+const MAX_GENERATED_SPEECH = 64
+const MAX_SPEECH_AUDIO_BYTES = 16 * 1024 * 1024
+const MAX_SPEECH_CUES_BYTES = 64 * 1024
 const ASSET_TOKEN_PATTERN = /^[A-Za-z0-9_-]{16,128}$/u
 const ALLOWED_ASSET_EXTENSIONS = new Set([
   '.bmp',
@@ -53,6 +60,9 @@ const ALLOWED_ASSET_EXTENSIONS = new Set([
   '.tga',
   '.vmd',
   '.webp',
+  '.wav',
+  '.ogg',
+  '.webm',
 ])
 
 export interface CompanionServerOptions {
@@ -64,6 +74,7 @@ export interface CompanionServerOptions {
   model?: CompanionModelSource
   motions?: readonly CompanionMotionSource[]
   onMotionPlayback?: (payload: ClientMotionPlaybackMessage['payload']) => void
+  onSpeechPlayback?: (payload: import('@rayure/protocol').ClientSpeechPlaybackMessage['payload']) => void
 }
 
 export interface CompanionServerAddress {
@@ -95,6 +106,15 @@ export interface CompanionServer {
     motion: CanonicalMotion
     loop?: boolean
   }): MotionDescriptor
+  /** Publishes tokenized audio and mouth-cue resources for renderer playback. */
+  publishSpeech(input: {
+    id: string
+    displayName: string
+    mimeType: SpeechAudioMimeType
+    audio: Uint8Array
+    durationMs: number
+    cues: readonly MouthCue[]
+  }): SpeechDescriptor
 }
 
 interface PreparedAsset {
@@ -111,6 +131,19 @@ interface PreparedGeneratedMotion {
   displayName: string
   motionId: string
   loop: boolean
+}
+
+interface PreparedSpeech {
+  kind: 'speech'
+  assetToken: string
+  audioEntryFileName: string
+  cuesEntryFileName: string
+  audio: Buffer
+  cues: Buffer
+  displayName: string
+  speechId: string
+  mimeType: SpeechAudioMimeType
+  durationMs: number
 }
 
 interface PreparedModel extends PreparedAsset {
@@ -138,7 +171,9 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
   let preparedMotions: readonly PreparedMotion[] = []
   const assetTokenMap = new Map<string, PreparedAsset>()
   const generatedTokenMap = new Map<string, PreparedGeneratedMotion>()
+  const speechTokenMap = new Map<string, PreparedSpeech>()
   let generatedMotionSequence = 0
+  let speechSequence = 0
   let startPromise: Promise<CompanionServerAddress> | undefined
   let stopPromise: Promise<void> | undefined
   const welcomedClients = new Set<WebSocket>()
@@ -165,7 +200,9 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
     try {
       assetTokenMap.clear()
       generatedTokenMap.clear()
+      speechTokenMap.clear()
       generatedMotionSequence = 0
+      speechSequence = 0
       preparedModel = options.model === undefined
         ? undefined
         : await prepareModel(options.model, createAssetToken())
@@ -187,7 +224,7 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
       }
 
       const createdHttpServer = createServer((request, response) => {
-        void handleHttpRequest(request, response, assetTokenMap, generatedTokenMap)
+        void handleHttpRequest(request, response, assetTokenMap, generatedTokenMap, speechTokenMap)
       })
       const createdWebSocketServer = new WebSocketServer({
         noServer: true,
@@ -222,6 +259,8 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
       preparedMotions = []
       assetTokenMap.clear()
       generatedTokenMap.clear()
+      speechTokenMap.clear()
+      speechSequence = 0
       webSocketServer = undefined
       httpServer = undefined
       await cleanupFailedStart(nextHttpServer, nextWebSocketServer)
@@ -278,7 +317,8 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
           return
         }
         try {
-          options.onMotionPlayback?.(message.payload)
+          if (message.type === 'motion.playback') options.onMotionPlayback?.(message.payload)
+          else options.onSpeechPlayback?.(message.payload)
         }
         catch {
           // Observation callbacks cannot own a healthy renderer session.
@@ -427,6 +467,8 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
       welcomedClients.clear()
       assetTokenMap.clear()
       generatedTokenMap.clear()
+      speechTokenMap.clear()
+      speechSequence = 0
       stopPromise = undefined
     }
   }
@@ -497,6 +539,70 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
     return descriptor
   }
 
+  function publishSpeech(input: {
+    id: string
+    displayName: string
+    mimeType: SpeechAudioMimeType
+    audio: Uint8Array
+    durationMs: number
+    cues: readonly MouthCue[]
+  }): SpeechDescriptor {
+    if (phase !== 'running' || address === undefined) {
+      throw new Error('Companion must be running before publishing speech')
+    }
+    const speechId = createPublishedSpeechId(requireMotionId(input.id), ++speechSequence)
+    const displayName = requireDisplayName(input.displayName, 'speech displayName', 96)
+    if (!speechAudioMimeTypes.includes(input.mimeType)) throw new Error('speech mimeType is unsupported')
+    if (!(input.audio instanceof Uint8Array) || input.audio.byteLength < 1 || input.audio.byteLength > MAX_SPEECH_AUDIO_BYTES) {
+      throw new Error('speech audio must be a non-empty Uint8Array up to 16 MiB')
+    }
+    requireSpeechDuration(input.durationMs)
+    const cues = validateSpeechCues(input.cues, input.durationMs)
+    const cueTrack: MouthCueTrack = {
+      version: 'rayure.mouth-cues.v1',
+      durationMs: input.durationMs,
+      cues,
+    }
+    const cueContent = Buffer.from(JSON.stringify(cueTrack), 'utf8')
+    if (cueContent.byteLength > MAX_SPEECH_CUES_BYTES) throw new Error('speech cue payload exceeds 64 KiB')
+    const assetToken = createAssetToken()
+    if (!ASSET_TOKEN_PATTERN.test(assetToken)) throw new Error('Asset token must contain 16-128 URL-safe characters')
+    const audioExtension = speechAudioExtension(input.mimeType)
+    const audioEntryFileName = `${speechId}.${audioExtension}`
+    const cuesEntryFileName = `${speechId}.cues.json`
+    speechTokenMap.set(assetToken, {
+      kind: 'speech',
+      assetToken,
+      audioEntryFileName,
+      cuesEntryFileName,
+      audio: Buffer.from(input.audio),
+      cues: cueContent,
+      displayName,
+      speechId,
+      mimeType: input.mimeType,
+      durationMs: input.durationMs,
+    })
+    while (speechTokenMap.size > MAX_GENERATED_SPEECH) {
+      const staleToken = speechTokenMap.keys().next().value
+      if (staleToken === undefined) break
+      speechTokenMap.delete(staleToken)
+    }
+    const descriptor: SpeechDescriptor = {
+      id: speechId,
+      displayName,
+      audioUrl: createGeneratedSpeechUrl(address, { assetToken, entryFileName: audioEntryFileName }),
+      cuesUrl: createGeneratedSpeechUrl(address, { assetToken, entryFileName: cuesEntryFileName }),
+      mimeType: input.mimeType,
+      durationMs: input.durationMs,
+    }
+    const serialized = serializeWireMessage(createServerSpeechPublished({ id: createId(), speech: descriptor }))
+    for (const socket of welcomedClients) {
+      if (socket.readyState !== WebSocket.OPEN) continue
+      try { socket.send(serialized) } catch { /* one client cannot own publication */ }
+    }
+    return descriptor
+  }
+
   function snapshot(): CompanionServerSnapshot {
     return {
       phase,
@@ -507,7 +613,7 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
     }
   }
 
-  return { start, stop, snapshot, publishMotion }
+  return { start, stop, snapshot, publishMotion, publishSpeech }
 }
 
 async function prepareModel(source: CompanionModelSource, assetToken: string): Promise<PreparedModel> {
@@ -558,6 +664,7 @@ async function handleHttpRequest(
   response: ServerResponse,
   assets: Map<string, PreparedAsset>,
   generated: Map<string, PreparedGeneratedMotion>,
+  speech: Map<string, PreparedSpeech>,
 ): Promise<void> {
   try {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -592,6 +699,12 @@ async function handleHttpRequest(
     const generatedMotion = generated.get(token)
     if (generatedMotion !== undefined) {
       serveGeneratedMotion(response, request.method, generatedMotion, segments, request.headers.origin)
+      return
+    }
+
+    const generatedSpeech = speech.get(token)
+    if (generatedSpeech !== undefined) {
+      serveSpeech(response, request.method, generatedSpeech, segments, request.headers.origin)
       return
     }
 
@@ -677,6 +790,43 @@ function serveGeneratedMotion(
   response.end(motion.content)
 }
 
+function serveSpeech(
+  response: ServerResponse,
+  method: string,
+  speech: PreparedSpeech,
+  segments: readonly string[],
+  origin: string | undefined,
+): void {
+  if (segments.length !== 1) {
+    respond(response, 404, 'Not Found')
+    return
+  }
+  const entry = segments[0]
+  if (entry === undefined) {
+    respond(response, 404, 'Not Found')
+    return
+  }
+  const content = entry === speech.audioEntryFileName
+    ? speech.audio
+    : entry === speech.cuesEntryFileName ? speech.cues : undefined
+  if (content === undefined) {
+    respond(response, 404, 'Not Found')
+    return
+  }
+  if (content.byteLength > MAX_ASSET_BYTES) {
+    respond(response, 413, 'Content Too Large')
+    return
+  }
+  const extension = extname(entry).toLowerCase()
+  applyAssetHeaders(response, origin, extension, content.byteLength)
+  response.statusCode = 200
+  if (method === 'HEAD') {
+    response.end()
+    return
+  }
+  response.end(content)
+}
+
 function applyAssetHeaders(
   response: ServerResponse,
   origin: string | undefined,
@@ -751,6 +901,13 @@ function createGeneratedMotionUrl(
   return `http://${address.host}:${address.port}/assets/${motion.assetToken}/${encodeURIComponent(motion.entryFileName)}`
 }
 
+function createGeneratedSpeechUrl(
+  address: CompanionServerAddress,
+  speech: Pick<PreparedSpeech, 'assetToken'> & { entryFileName: string },
+): string {
+  return `http://${address.host}:${address.port}/assets/${speech.assetToken}/${encodeURIComponent(speech.entryFileName)}`
+}
+
 function createAssetUrlForPath(
   address: CompanionServerAddress,
   asset: PreparedAsset,
@@ -789,8 +946,35 @@ function contentTypeFor(extension: string): string {
     '.sph': 'image/bmp',
     '.tga': 'image/x-tga',
     '.webp': 'image/webp',
+    '.wav': 'audio/wav',
+    '.ogg': 'audio/ogg',
+    '.webm': 'audio/webm',
   }
   return contentTypes[extension] ?? 'application/octet-stream'
+}
+
+function speechAudioExtension(mimeType: SpeechAudioMimeType): 'wav' | 'ogg' | 'webm' {
+  if (mimeType === 'audio/wav') return 'wav'
+  if (mimeType === 'audio/ogg') return 'ogg'
+  return 'webm'
+}
+
+function requireSpeechDuration(value: unknown): asserts value is number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 600_000) throw new Error('speech durationMs must be an integer from 1 through 600000')
+}
+
+function validateSpeechCues(value: readonly MouthCue[], durationMs: number): readonly MouthCue[] {
+  if (!Array.isArray(value) || value.length > 2048) throw new Error('speech cues must contain at most 2048 items')
+  let previous = -1
+  const cues: MouthCue[] = []
+  for (const cue of value) {
+    if (!cue || typeof cue !== 'object' || !Number.isSafeInteger(cue.timeMs) || cue.timeMs < 0 || cue.timeMs > durationMs || cue.timeMs < previous || typeof cue.value !== 'number' || !Number.isFinite(cue.value) || cue.value < 0 || cue.value > 1) {
+      throw new Error('speech cues must have monotonic bounded time/value pairs')
+    }
+    cues.push({ timeMs: cue.timeMs, value: cue.value })
+    previous = cue.timeMs
+  }
+  return cues
 }
 
 function respond(response: ServerResponse, statusCode: number, body: string): void {
@@ -906,6 +1090,13 @@ function createPublishedMotionId(baseId: string, sequence: number): string {
   if (result.length > 64) {
     throw new Error('generated motion id is too long to create a unique publication id')
   }
+  return result
+}
+
+function createPublishedSpeechId(baseId: string, sequence: number): string {
+  if (!Number.isSafeInteger(sequence) || sequence < 1) throw new Error('speech publication sequence is invalid')
+  const result = `${baseId}-${sequence.toString(36)}`
+  if (result.length > 64) throw new Error('speech id is too long to create a unique publication id')
   return result
 }
 

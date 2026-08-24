@@ -96,6 +96,8 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
   #generatedRootOrigin: CanonicalVector3 | undefined
   #generatedRootAnchorOffset = { x: 0, y: 0 }
   #canvasMotionOffset = { x: 0, y: 0 }
+  #speechMouthValue = 0
+  #speechMouthParameterId: string | undefined
   #disposed = false
 
   constructor(container: HTMLElement, options: Live2dNativeDebugSurfaceOptions) {
@@ -158,6 +160,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
       this.#modelReady = true
       this.#nativeMotion.bindModel(model)
       this.#parameterIds = [...(model.getParameterNames?.() ?? [])]
+      this.#speechMouthParameterId = this.#parameterIds.find(parameterId => /mouth.*open|open.*mouth|mouthopeny/iu.test(parameterId))
       this.#player = new Live2dMotionPlayer(this)
       this.#generatedMotion = new CanonicalMotionPlayer(this)
       window.addEventListener('resize', this.#resize, { passive: true })
@@ -199,6 +202,12 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
 
   get isReady(): boolean {
     return !this.#disposed && this.#modelReady && this.#model !== undefined
+  }
+
+  /** Sets the renderer-owned speech mouth channel; motion parameter writes stay separate. */
+  setSpeechMouthValue(value: number): void {
+    if (!Number.isFinite(value)) return
+    this.#speechMouthValue = Math.min(1, Math.max(0, value))
   }
 
   updateMotionCatalog(motions: readonly MotionDescriptor[]): void {
@@ -410,6 +419,8 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
     }
     this.#model = undefined
     this.#parameters.clear()
+    this.#speechMouthValue = 0
+    this.#speechMouthParameterId = undefined
     this.#canvas?.remove()
     this.#canvas = undefined
   }
@@ -445,6 +456,11 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
     else if (this.#player.isPlaying) {
       this.#parameterOwner = 'debug'
       this.#player.advance(deltaSeconds)
+    }
+    const mouthParameterId = this.#speechMouthParameterId
+    if (mouthParameterId !== undefined) {
+      this.#model.setParameter(mouthParameterId, this.#speechMouthValue)
+      this.#parameters.set(mouthParameterId, this.#speechMouthValue)
     }
     this.#model.update()
     if (timestamp - this.#lastSnapshotAt >= 100) {

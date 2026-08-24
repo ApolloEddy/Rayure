@@ -7,8 +7,10 @@ import {
   ProtocolValidationError,
   createClientHello,
   createClientMotionPlayback,
+  createClientSpeechPlayback,
   createServerModelAvailable,
   createServerMotionPublished,
+  createServerSpeechPublished,
   createServerWelcome,
   parseClientMessage,
   parseServerMessage,
@@ -36,6 +38,31 @@ test('renderer playback telemetry round-trips and accepts only bounded frame pro
     { protocolVersion: 1, type: 'motion.playback', id: 'x', payload: { motionId: 'motion', phase: 'progress', frameIndex: 1, extra: true } },
   ]) {
     assert.throws(() => parseClientMessage(JSON.stringify(payload)), ProtocolValidationError)
+  }
+})
+
+test('speech publication and playback telemetry stay tokenized and bounded', () => {
+  const playback = createClientSpeechPlayback({
+    id: 'speech-playback-1',
+    speechId: 'reply-1',
+    phase: 'progress',
+    timeMs: 120,
+  })
+  assert.deepEqual(parseClientMessage(JSON.stringify(playback)), playback)
+  const published = createServerSpeechPublished({
+    id: 'speech-published-1',
+    speech: {
+      id: 'reply-1',
+      displayName: 'Hello',
+      audioUrl: 'http://127.0.0.1:32145/assets/0123456789abcdef/reply-1.wav',
+      cuesUrl: 'http://127.0.0.1:32145/assets/0123456789abcdef/reply-1.cues.json',
+      mimeType: 'audio/wav',
+      durationMs: 400,
+    },
+  })
+  assert.deepEqual(parseServerMessage(JSON.stringify(published)), published)
+  for (const timeMs of [-1, 600_001]) {
+    assert.throws(() => createClientSpeechPlayback({ id: 'speech', speechId: 'reply', phase: 'progress', timeMs }), ProtocolValidationError)
   }
 })
 

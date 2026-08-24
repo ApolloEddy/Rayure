@@ -1,5 +1,16 @@
 export * from './canonical-motion.ts'
 export * from './motion-semantic-feature.ts'
+export * from './speech.ts'
+
+import {
+  speechAudioMimeTypes,
+  speechPlaybackPhases,
+} from './speech.ts'
+import type {
+  SpeechAudioMimeType,
+  SpeechDescriptor,
+  SpeechPlaybackPhase,
+} from './speech.ts'
 
 export const PROTOCOL_VERSION = 1 as const
 export const MAX_WIRE_MESSAGE_BYTES = 16 * 1024
@@ -9,6 +20,7 @@ export const companionCapabilities = [
   'model.catalog',
   'motion.catalog',
   'motion.playback',
+  'speech.output',
   'expression.control',
 ] as const
 export type CompanionCapability = typeof companionCapabilities[number]
@@ -45,6 +57,17 @@ export interface ClientMotionPlaybackMessage {
     motionId: string
     phase: MotionPlaybackPhase
     frameIndex: number
+  }
+}
+
+export interface ClientSpeechPlaybackMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'speech.playback'
+  id: string
+  payload: {
+    speechId: string
+    phase: SpeechPlaybackPhase
+    timeMs: number
   }
 }
 
@@ -177,6 +200,15 @@ export interface ServerMotionPublishedMessage {
   }
 }
 
+export interface ServerSpeechPublishedMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'speech.published'
+  id: string
+  payload: {
+    speech: SpeechDescriptor
+  }
+}
+
 export interface ServerEmotePlayMessage {
   protocolVersion: typeof PROTOCOL_VERSION
   type: 'emote.play'
@@ -190,13 +222,14 @@ export interface ServerEmotePlayMessage {
   }
 }
 
-export type ClientMessage = ClientHelloMessage | ClientMotionPlaybackMessage
+export type ClientMessage = ClientHelloMessage | ClientMotionPlaybackMessage | ClientSpeechPlaybackMessage
 export type ServerMessage =
   | ServerWelcomeMessage
   | ServerErrorMessage
   | ServerModelAvailableMessage
   | ServerMotionCatalogMessage
   | ServerMotionPublishedMessage
+  | ServerSpeechPublishedMessage
   | ServerMotionPlayMessage
   | ServerMotionStopMessage
   | ServerExpressionSetMessage
@@ -236,6 +269,24 @@ export function createClientMotionPlayback(input: {
       motionId: requireIdentifier(input.motionId, 'motionId'),
       phase: requireMotionPlaybackPhase(input.phase),
       frameIndex: requireInteger(input.frameIndex, 'frameIndex', 0, 600),
+    },
+  }
+}
+
+export function createClientSpeechPlayback(input: {
+  id: string
+  speechId: string
+  phase: SpeechPlaybackPhase
+  timeMs: number
+}): ClientSpeechPlaybackMessage {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'speech.playback',
+    id: requireIdentifier(input.id, 'id'),
+    payload: {
+      speechId: requireIdentifier(input.speechId, 'speechId'),
+      phase: requireSpeechPlaybackPhase(input.phase),
+      timeMs: requireInteger(input.timeMs, 'timeMs', 0, 600_000),
     },
   }
 }
@@ -393,6 +444,20 @@ export function createServerMotionPublished(input: {
   }
 }
 
+export function createServerSpeechPublished(input: {
+  id: string
+  speech: SpeechDescriptor
+}): ServerSpeechPublishedMessage {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'speech.published',
+    id: requireIdentifier(input.id, 'id'),
+    payload: {
+      speech: requireSpeechDescriptor(input.speech),
+    },
+  }
+}
+
 export function createServerEmotePlay(input: {
   id: string
   emoteId: string
@@ -447,6 +512,17 @@ export function parseClientMessage(raw: string): ClientMessage {
       motionId: requireIdentifier(payload.motionId, 'motionId'),
       phase: requireMotionPlaybackPhase(payload.phase),
       frameIndex: requireInteger(payload.frameIndex, 'frameIndex', 0, 600),
+    })
+  }
+
+  if (value.type === 'speech.playback') {
+    const payload = requireRecord(value.payload, 'speech playback payload')
+    requireExactKeys(payload, ['speechId', 'phase', 'timeMs'], 'speech playback payload')
+    return createClientSpeechPlayback({
+      id: requireIdentifier(value.id, 'id'),
+      speechId: requireIdentifier(payload.speechId, 'speechId'),
+      phase: requireSpeechPlaybackPhase(payload.phase),
+      timeMs: requireInteger(payload.timeMs, 'timeMs', 0, 600_000),
     })
   }
 
@@ -586,6 +662,16 @@ export function parseServerMessage(raw: string): ServerMessage {
     })
   }
 
+  if (value.type === 'speech.published') {
+    requireExactKeys(value, ['protocolVersion', 'type', 'id', 'payload'], 'speech published')
+    const payload = requireRecord(value.payload, 'speech published payload')
+    requireExactKeys(payload, ['speech'], 'speech published payload')
+    return createServerSpeechPublished({
+      id: requireIdentifier(value.id, 'id'),
+      speech: requireSpeechDescriptor(payload.speech),
+    })
+  }
+
   if (value.type === 'emote.play') {
     requireExactKeys(value, ['protocolVersion', 'type', 'id', 'payload'], 'emote play')
     const payload = requireRecord(value.payload, 'emote play payload')
@@ -703,6 +789,13 @@ function requireMotionPlaybackPhase(value: unknown): MotionPlaybackPhase {
   return value as MotionPlaybackPhase
 }
 
+function requireSpeechPlaybackPhase(value: unknown): SpeechPlaybackPhase {
+  if (typeof value !== 'string' || !speechPlaybackPhases.includes(value as SpeechPlaybackPhase)) {
+    throw new ProtocolValidationError('speech playback phase is invalid')
+  }
+  return value as SpeechPlaybackPhase
+}
+
 function requireErrorCode(value: unknown): ServerErrorCode {
   if (
     value !== 'invalid_message'
@@ -812,6 +905,22 @@ function requireMotionDescriptor(value: unknown): MotionDescriptor {
   }
 
   throw new ProtocolValidationError('motion format must be vmd, live2d or canonical')
+}
+
+function requireSpeechDescriptor(value: unknown): SpeechDescriptor {
+  const speech = requireRecord(value, 'speech descriptor')
+  requireExactKeys(speech, ['id', 'displayName', 'audioUrl', 'cuesUrl', 'mimeType', 'durationMs'], 'speech descriptor')
+  if (typeof speech.mimeType !== 'string' || !speechAudioMimeTypes.includes(speech.mimeType as SpeechAudioMimeType)) {
+    throw new ProtocolValidationError('speech mimeType is unsupported')
+  }
+  return {
+    id: requireIdentifier(speech.id, 'speech id'),
+    displayName: requireDisplayString(speech.displayName, 'speech displayName', 96),
+    audioUrl: requireLoopbackAssetUrl(speech.audioUrl),
+    cuesUrl: requireLoopbackAssetUrl(speech.cuesUrl),
+    mimeType: speech.mimeType as SpeechAudioMimeType,
+    durationMs: requireInteger(speech.durationMs, 'speech durationMs', 1, 600_000),
+  }
 }
 
 function requireWeight(value: unknown): number {
