@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { realpath, stat } from 'node:fs/promises'
+import { readFile, realpath, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { IncomingMessage, Server as HttpServer, ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -13,6 +13,7 @@ import {
   createServerError,
   createServerModelAvailable,
   createServerMotionCatalog,
+  createServerMotionGenerateStatus,
   createServerMotionPublished,
   createServerSpeechPublished,
   createServerWelcome,
@@ -23,6 +24,7 @@ import {
 } from '@rayure/protocol'
 import type {
   CanonicalMotion,
+  ClientMotionGenerateMessage,
   ClientMotionPlaybackMessage,
   Live2dMotionDescriptor,
   MotionDescriptor,
@@ -74,6 +76,7 @@ export interface CompanionServerOptions {
   model?: CompanionModelSource
   motions?: readonly CompanionMotionSource[]
   onMotionPlayback?: (payload: ClientMotionPlaybackMessage['payload']) => void
+  onMotionGenerate?: (input: { id: string } & ClientMotionGenerateMessage['payload']) => void | Promise<unknown>
   onSpeechPlayback?: (payload: import('@rayure/protocol').ClientSpeechPlaybackMessage['payload']) => void
 }
 
@@ -121,6 +124,7 @@ interface PreparedAsset {
   rootPath: string
   entryFileName: string
   assetToken: string
+  virtualFiles?: ReadonlyMap<string, Buffer>
 }
 
 interface PreparedGeneratedMotion {
@@ -149,6 +153,8 @@ interface PreparedSpeech {
 interface PreparedModel extends PreparedAsset {
   source: CompanionModelSource
   live2dMotions: readonly PreparedLive2dMotion[]
+  nativeEntryFileName?: string
+  skinHiddenPartIds: readonly string[]
 }
 
 interface PreparedMotion extends PreparedAsset {
@@ -290,6 +296,26 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
 
   function handleConnection(socket: WebSocket): void {
     let welcomed = false
+    const sendMotionGenerateStatus = (
+      replyTo: string,
+      phase: 'accepted' | 'failed',
+      message?: string,
+    ): void => {
+      if (socket.readyState !== WebSocket.OPEN) return
+      try {
+        socket.send(serializeWireMessage(createServerMotionGenerateStatus({
+          id: createId(),
+          replyTo,
+          phase,
+          ...(message === undefined
+            ? {}
+            : { message: message.replace(/[\u0000-\u001F\u007F]/gu, ' ').trim().slice(0, 160) || 'Motion generation failed' }),
+        })))
+      }
+      catch {
+        // A status diagnostic must not own the websocket lifecycle.
+      }
+    }
     const helloTimer = setTimeout(() => {
       if (welcomed || socket.readyState !== WebSocket.OPEN) return
       sendErrorAndClose(socket, 'hello_timeout', 'Client hello was not received in time', 1008)
@@ -316,6 +342,17 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
       if (welcomed) {
         if (message.type === 'client.hello') {
           sendErrorAndClose(socket, 'duplicate_hello', 'Client hello has already completed', 1008, message.id)
+          return
+        }
+        if (message.type === 'motion.generate') {
+          if (options.onMotionGenerate === undefined) {
+            sendMotionGenerateStatus(message.id, 'failed', 'Motion generation is not configured')
+            return
+          }
+          sendMotionGenerateStatus(message.id, 'accepted')
+          void Promise.resolve(options.onMotionGenerate({ id: message.id, ...message.payload })).catch((cause: unknown) => {
+            sendMotionGenerateStatus(message.id, 'failed', toErrorMessage(cause))
+          })
           return
         }
         try {
@@ -347,6 +384,9 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
         const boundAddress = address
         if (model && boundAddress) {
           const entryUrl = createAssetUrl(boundAddress, model)
+          const nativeUrl = model.nativeEntryFileName === undefined
+            ? undefined
+            : createAssetUrlForPath(boundAddress, model, model.nativeEntryFileName)
           outbound.push(serializeWireMessage(createServerModelAvailable({
             id: createId(),
             model: {
@@ -354,6 +394,10 @@ export function createCompanionServer(options: CompanionServerOptions = {}): Com
               displayName: model.source.displayName,
               format: model.source.format,
               url: entryUrl,
+              ...(nativeUrl === undefined ? {} : { nativeUrl }),
+              ...(model.skinHiddenPartIds.length === 0
+                ? {}
+                : { skinHiddenPartIds: model.skinHiddenPartIds }),
             },
           })))
         }
@@ -640,13 +684,134 @@ async function prepareModel(source: CompanionModelSource, assetToken: string): P
   const live2dMotions = source.format === 'live2d'
     ? await readLive2dMotionCatalog(entryFilePath)
     : []
+  if (source.format === 'live2d') {
+    const model3 = await prepareLive2dModel3Entries(entryFilePath)
+    const skinHiddenPartIds = [...new Set([
+      ...model3.autoHiddenPartIds,
+      ...(source.skinHiddenPartIds ?? []),
+    ])]
+    return {
+      source: { ...source, entryFilePath },
+      rootPath: dirname(entryFilePath),
+      entryFileName: model3.skinEntryFileName,
+      assetToken,
+      virtualFiles: new Map([
+        [model3.skinEntryFileName, model3.skinContent],
+        [model3.nativeEntryFileName, model3.nativeContent],
+      ]),
+      nativeEntryFileName: model3.nativeEntryFileName,
+      skinHiddenPartIds,
+      live2dMotions,
+    }
+  }
   return {
     source: { ...source, entryFilePath },
     rootPath: dirname(entryFilePath),
     entryFileName: entryFilePath.slice(dirname(entryFilePath).length + 1),
     assetToken,
+    skinHiddenPartIds: [],
     live2dMotions,
   }
+}
+
+async function prepareLive2dModel3Entries(entryFilePath: string): Promise<{
+  skinEntryFileName: string
+  nativeEntryFileName: string
+  skinContent: Buffer
+  nativeContent: Buffer
+  autoHiddenPartIds: readonly string[]
+}> {
+  const bytes = await readFile(entryFilePath)
+  if (bytes.byteLength > 4 * 1024 * 1024) throw new Error('Live2D model3.json exceeds 4 MiB')
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(bytes.toString('utf8'))
+  }
+  catch {
+    throw new Error('Live2D model3.json must contain valid JSON')
+  }
+
+  const root = asServerRecord(parsed, 'Live2D model3.json')
+  if (root.Version !== 3) throw new Error('Live2D model3.json Version must be 3')
+  asServerRecord(root.FileReferences, 'Live2D FileReferences')
+
+  const nativeRoot = cloneServerJson(root)
+  const nativeReferences = asServerRecord(nativeRoot.FileReferences, 'Live2D FileReferences')
+  for (const key of ['Physics', 'Pose', 'UserData', 'DisplayInfo'] as const) {
+    if (nativeReferences[key] === null) delete nativeReferences[key]
+  }
+
+  const skinRoot = cloneServerJson(nativeRoot)
+  const skinReferences = asServerRecord(skinRoot.FileReferences, 'Live2D FileReferences')
+  delete skinReferences.Motions
+
+  const entryFileName = entryFilePath.slice(dirname(entryFilePath).length + 1)
+  const skinEntryFileName = `__rayure_skin__${entryFileName}`
+  const nativeEntryFileName = `__rayure_native__${entryFileName}`
+  return {
+    skinEntryFileName,
+    nativeEntryFileName,
+    skinContent: Buffer.from(JSON.stringify(skinRoot)),
+    nativeContent: Buffer.from(JSON.stringify(nativeRoot)),
+    autoHiddenPartIds: await inferLive2dScenePartIds(entryFilePath, nativeRoot),
+  }
+}
+
+async function inferLive2dScenePartIds(
+  entryFilePath: string,
+  model3: Record<string, unknown>,
+): Promise<readonly string[]> {
+  const references = asServerRecord(model3.FileReferences, 'Live2D FileReferences')
+  const displayInfo = references.DisplayInfo
+  if (typeof displayInfo !== 'string' || displayInfo.trim() !== displayInfo || displayInfo.length === 0) return []
+
+  const rootPath = dirname(entryFilePath)
+  const candidate = resolve(rootPath, ...displayInfo.replaceAll('\\', '/').split('/'))
+  if (!isContainedPath(rootPath, candidate)) return []
+
+  let bytes: Buffer
+  try {
+    const displayInfoPath = await realpath(candidate)
+    const metadata = await stat(displayInfoPath)
+    if (!isContainedPath(rootPath, displayInfoPath) || !metadata.isFile() || metadata.size > 4 * 1024 * 1024) return []
+    bytes = await readFile(displayInfoPath)
+  }
+  catch {
+    return []
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(bytes.toString('utf8'))
+  }
+  catch {
+    return []
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return []
+  const root = parsed as Record<string, unknown>
+  if (!Array.isArray(root.Parts)) return []
+  const ids: string[] = []
+  for (const value of root.Parts) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const part = value as Record<string, unknown>
+    if (typeof part.Id !== 'string' || typeof part.Name !== 'string') continue
+    if (looksLikeLive2dScenePart(`${part.Id} ${part.Name}`)) ids.push(part.Id)
+  }
+  return [...new Set(ids)]
+}
+
+function looksLikeLive2dScenePart(value: string): boolean {
+  return /background|backdrop|floor|ground|door|mirror|clock|particle|effect|stage|scene|environment|ambient|room|window|table|card|\b(bg)\b|背景|地板|门|镜|时钟|粒子|氛围|素材|场景|环境|房间|窗|桌|卡牌/iu.test(value)
+}
+
+function cloneServerJson(value: unknown): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>
+}
+
+function asServerRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
+  return value as Record<string, unknown>
 }
 
 async function prepareMotion(source: CompanionMotionSource, assetToken: string): Promise<PreparedMotion> {
@@ -727,6 +892,12 @@ async function handleHttpRequest(
       return
     }
 
+    const virtualContent = asset.virtualFiles?.get(segments.join('/'))
+    if (virtualContent !== undefined) {
+      serveAssetBuffer(response, request.method, virtualContent, extension, request.headers.origin)
+      return
+    }
+
     const candidate = resolve(asset.rootPath, ...segments)
     if (!isContainedPath(asset.rootPath, candidate)) {
       respond(response, 403, 'Forbidden')
@@ -771,6 +942,26 @@ async function handleHttpRequest(
     if (!response.headersSent) respond(response, 500, 'Internal Server Error')
     else response.destroy()
   }
+}
+
+function serveAssetBuffer(
+  response: ServerResponse,
+  method: string,
+  content: Buffer,
+  extension: string,
+  origin: string | undefined,
+): void {
+  if (content.byteLength > MAX_ASSET_BYTES) {
+    respond(response, 413, 'Content Too Large')
+    return
+  }
+  applyAssetHeaders(response, origin, extension, content.byteLength)
+  response.statusCode = 200
+  if (method === 'HEAD') {
+    response.end()
+    return
+  }
+  response.end(content)
 }
 
 function serveGeneratedMotion(

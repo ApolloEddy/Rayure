@@ -24,7 +24,10 @@ body,
 }
 
 body {
-  background: #18100c;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(55, 88, 110, 0.34), transparent 46%),
+    radial-gradient(circle at 12% 100%, rgba(38, 91, 111, 0.2), transparent 42%),
+    #060a0e;
   user-select: none;
 }
 
@@ -52,11 +55,11 @@ body::before {
   outline: none;
 }
 
-.live2d-native-debug-canvas {
+.live2d-native-canvas {
   position: absolute;
   inset: 0;
   z-index: 1;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .brand {
@@ -185,87 +188,11 @@ body::before {
   }
 }
 
-.debug-toolbar {
-  position: fixed;
-  left: clamp(20px, 4vw, 64px);
-  bottom: clamp(20px, 4vw, 56px);
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.live2d-diagnostics-panel[hidden] {
+  display: none;
 }
 
-.debug-toolbar__toggle {
-  align-self: flex-start;
-  padding: 6px 12px;
-  border: 1px solid rgba(223, 248, 255, 0.2);
-  border-radius: 20px;
-  background: rgba(5, 12, 17, 0.75);
-  color: rgba(239, 252, 255, 0.9);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  cursor: pointer;
-  backdrop-filter: blur(16px);
-  transition: background 0.2s, border-color 0.2s, transform 0.1s;
-}
-
-.debug-toolbar__toggle:hover {
-  background: rgba(15, 26, 35, 0.9);
-  border-color: var(--accent);
-}
-
-.debug-toolbar__panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 14px;
-  border: 1px solid rgba(223, 248, 255, 0.14);
-  border-radius: 12px;
-  background: rgba(5, 12, 17, 0.85);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(20px);
-}
-
-.debug-toolbar__group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.debug-toolbar__label {
-  color: rgba(201, 222, 228, 0.5);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.debug-toolbar__buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.debug-toolbar__buttons button {
-  padding: 5px 10px;
-  border: 1px solid rgba(223, 248, 255, 0.12);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(239, 252, 255, 0.88);
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.debug-toolbar__buttons button:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: #fff;
-  transform: translateY(-1px);
-}
-
-.live2d-debug-panel {
+.live2d-diagnostics-panel {
   position: fixed;
   top: clamp(20px, 4vw, 56px);
   right: clamp(20px, 4vw, 64px);
@@ -273,33 +200,93 @@ body::before {
   display: grid;
   gap: 5px;
   max-width: min(440px, calc(100vw - 40px));
+  max-height: min(82vh, 620px);
+  overflow: auto;
   padding: 11px 13px;
   border: 1px solid rgba(255, 216, 169, 0.24);
   border-radius: 10px;
   background: rgba(37, 19, 11, 0.78);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.3);
   color: rgba(255, 238, 220, 0.84);
-  pointer-events: none;
+  pointer-events: auto;
 }
 
-.live2d-debug-panel strong {
+.live2d-diagnostics-panel strong {
   color: #ffd3a8;
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
-.live2d-debug-panel span {
+.live2d-diagnostics-panel span {
   color: rgba(255, 225, 202, 0.55);
   font-size: 9px;
   letter-spacing: 0.03em;
 }
 
-.live2d-debug-panel code {
+.live2d-diagnostics-panel code {
   overflow: hidden;
   color: rgba(255, 244, 231, 0.78);
   font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.live2d-diagnostics-toolbar,
+.live2d-diagnostics-expressions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.live2d-diagnostics-panel button {
+  border: 1px solid rgba(255, 216, 169, 0.28);
+  border-radius: 6px;
+  padding: 4px 7px;
+  background: rgba(255, 223, 186, 0.08);
+  color: rgba(255, 244, 231, 0.88);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+
+.live2d-diagnostics-panel button:hover,
+.live2d-diagnostics-panel button:focus-visible {
+  border-color: rgba(255, 216, 169, 0.72);
+  background: rgba(255, 223, 186, 0.18);
+  outline: none;
+}
+
+.live2d-diagnostics-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.live2d-diagnostics-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 216, 169, 0.28);
+  border-radius: 6px;
+  padding: 5px 7px;
+  background: rgba(255, 244, 231, 0.08);
+  color: rgba(255, 244, 231, 0.92);
+  font: inherit;
+  font-size: 10px;
+}
+
+.live2d-diagnostics-input:focus {
+  border-color: rgba(255, 216, 169, 0.72);
+  outline: none;
+}
+
+.live2d-diagnostics-label {
+  margin-top: 3px;
+}
+
+.live2d-diagnostics-expressions-list {
+  max-width: 100%;
+  color: rgba(255, 244, 231, 0.56) !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
 }

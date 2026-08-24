@@ -17,7 +17,7 @@ ASR 最终转录 -> Agent 结构化计划 -> BehaviorOrchestrator
   -> Canonical Motion（27 关节，renderer 无关）
   -> 令牌化 motion.published 广播 + motion.playback 回执
   -> Rig Adapter
-       |- Live2D Adapter（当前主线，Hiyori 已验收）
+       |- Live2D Adapter（当前主线；岛风皮套/原生内容完成浏览器预检，模型专属参数映射和 ARDY 行走视觉仍未验收）
        `- 3D Adapter（冻结回归基线）
 
 Agent 计划中的 replyText -> LiveTalker TTS / fixture / 包外 JSONL 小模型
@@ -25,19 +25,21 @@ Agent 计划中的 replyText -> LiveTalker TTS / fixture / 包外 JSONL 小模�
   -> SpeechPlayer -> Live2D mouth channel + speech.playback
 ```
 
+2026-08-25 收尾边界：当前岛风模型的真实 parameter id 已确认，代码中有一个显式 Shimakaze RigProfile，用于把 ARDY 的头、身、手臂、腿、膝、脚和蹲起控制投影到该模型的非标准参数。这个 profile 仍是模型专属的手工校准，通用的 model3/DisplayInfo 导入、映射结果/缺失参数诊断和“任意新模型自动适配”尚未完成；本地浏览器看到生成请求 `completed` 也不等于已经通过可见步态或 Wallpaper Engine CEF 验收。
+
 已完成的里程碑：
 
 - **ARDY Bridge**（`scripts/ardy-bridge.py`）：JSONL 协议子进程，在 RTX 4060 8GB 上以真实权重运行；续写令牌与具体生成段一一对应，Renderer 确认的帧数决定其按 ARDY token 对齐的裁剪位置，绝不回退到“最近一次”全局状态或不可靠的 Canonical JSON 反推。`Hips`、双手和双脚的 Root2D/EndEffector 约束已经过真实短段与连续续写验证。
 - **云端词向量生产线**（`autodl/`）：DeepSeek 按 21 类动作 × 速度/幅度/情感/方向四维修饰批量展开意图字典，AutoDL 24GB 卡用 LLM2Vec（llama-3-8b）一次性编码为 30,011 条语义特征（fp16 / 4096 维 / 约 323 MB），本地 Companion 启动即缓存命中，**运行时完全不需要文本编码器**。
 - **MotionScheduler 连续调度**：`advance()` 仅保留给 headless 测试；生产续写只采用 Renderer 的 `motion.playback` 回执。抢占会取消生成器实际收到的 signal，发布失败的未观察 buffer 会回滚；预测 replan 生成的下一段先留在独立 buffer，只有进入 handoff 窗口才提交。
 - **ARDY 待机连续动作**：`motionSemantic.idlePool` 以 round-robin 选择待机 prompt，在当前动作剩余时间进入 lookahead 窗口后提前生成，并在 handoff 窗口发布；语音/视觉直接动作会取消过期预取。Renderer 新加入可单测的参数 crossfade，默认从当前真实参数姿态平滑过渡 180 ms。
-- **Live2D 原生渲染**：生成动作、原生动作和 debug fixture 现在是互斥的单一参数写入者；20 fps Canonical Motion 在渲染帧间做位置线性插值和四元数 slerp，生成开始采用 crossfade，根位移投影到画布且 Hiyori `ParamLeg` 会表达步态。
+- **Live2D 原生渲染**：生成动作、原生动作和 debug fixture 现在是互斥的单一参数写入者；20 fps Canonical Motion 在渲染帧间做位置线性插值和四元数 slerp，生成开始采用 crossfade，根位移投影到画布并由 RigProfile 适配模型参数。
 - **浏览器构建**：冻结的 PMX/MMD 主机按需加载；第三方依赖的 Node-only 可选分支有明确浏览器 stub，不再产生 Vite browser-external 告警，最大 JS 分块为 380 kB。
 - **视觉事件**：`VisionProcessClient` + `scripts/mediapipe-vision-bridge.py` 只接受严格的派生观察；presence、头向、举手、挥手采用迟滞/连续帧/冷却窗口，事件 action 通过 allowlist 接入动作策略。`--simulate` 可在无摄像头/模型环境回归。
 - **语音事件**：`SpeechRuntime` 支持 `globalThis.rayureSpeech.submitText(...)` 和包外 ASR JSONL；已提供 LiveTalker `/api/chat` 与 `/api/synthesize` 兼容适配器，Agent 输出会转换为结构化 `BehaviorPlan`，TTS WAV 会转换为口型曲线；所有 provider 调用具备 signal/generation 抢占边界。
 - **音频与口型**：Companion 只发布 token 化音频和 `rayure.mouth-cues.v1` 曲线；Wallpaper `SpeechPlayer` 驱动 `ParamMouthOpenY` 类参数并回报 `speech.playback`。
 
-`CHANGELOG.md` 已记录 2026-08-24 的未发布变更（最新开发基线为 `0.6.0-dev`，此前的 3D 记录为 0.4.8），根工作区 manifest 仍为 0.2.0。本仓库应视为开发快照。当前统一验证 201 项测试（协议 21、Companion 118、Wallpaper 62）、TypeScript、四条 Python bridge 编译、生产构建与发布边界审计全部通过。
+`CHANGELOG.md` 已记录 2026-08-25 的未发布变更（最新开发基线为 `0.6.0-dev`，此前的 3D 记录为 0.4.8），根工作区 manifest 仍为 0.2.0。本仓库应视为开发快照。本次本地测试通过 211 项（协议 23、Companion 120、Wallpaper 68）；TypeScript、生产构建、四条 Python bridge 编译与发布边界审计仍按独立门禁记录，Live2D 模型专属参数映射和 Wallpaper Engine CEF 可见步态尚未关闭。
 
 ## 已实现
 
@@ -47,13 +49,37 @@ Agent 计划中的 replyText -> LiveTalker TTS / fixture / 包外 JSONL 小模�
 - 严格版本化协议、16 KiB 消息上限、未知字段拒绝、握手状态校验，以及仅对当前已发布动作生效的 `motion.playback` 播放回执；
 - 随机会话令牌保护的只读模型/动作网关，以及 Origin、方法、扩展名、大小和 realpath 边界校验；
 - 严格的 27 关节 `Canonical Motion v1` 合同与校验；
-- Live2D：`.model3.json` 清单校验、标准参数 RigProfile、原生 Cubism 调试画布（Core 来源受控）、motion3 动作目录、互斥播放槽、Canonical Motion 插值/根位移/步态映射；
+- Live2D：`.model3.json` 清单校验、标准参数 RigProfile、原生 Cubism 画布（Core 来源受控）、motion3 动作目录、互斥播放槽、Canonical Motion 插值/根位移/步态映射；
 - ARDY 动作生成：进程协议、语义特征缓存（内存/文件、fp16/fp32、token mask）、Text Encoder API 客户端（可选）、启动预设生成、idle action pool、预测式 replan buffer、实体坐标约束与实时意图入口 `globalThis.rayureMotionGeneration`；
 - BehaviorOrchestrator：统一视觉、语音和直接行为的优先级、去重、过期、抢占取消与 generation 隔离；
 - 摄像头/MediaPipe：包外 Python Bridge、派生观察合同、低频事件检测和 allowlist 动作策略；
 - ASR → Agent → TTS/口型：ASR/Agent/TTS 的 provider-neutral 合同、LiveTalker HTTP 兼容适配器、包外 JSONL adapters、tokenized speech gateway、Wallpaper `SpeechPlayer` 和 playback telemetry；
 - 模型和动作异步加载的 generation 隔离、失败保留、迟到结果释放与资源清理；
 - `scripts/verify.ps1` 统一执行测试、TypeScript、生产构建、依赖审计和发布边界检查。
+
+### Live2D 皮套与 Wallpaper Engine 设置
+
+Live2D 在 Wallpaper Engine 中默认按“皮套”接入：Companion 会把 `.model3.json` 的默认入口生成为不含 `Motions` 的 skin-only 入口，避免把模型自带场景和动作无条件带进壁纸；Rayure 自己的 Canonical Motion、口型、鼠标和行为交互仍由现有运行时负责。模型原生动作/场景层只有在 Wallpaper Engine 属性中勾选 **Import model-native content / 导入模型自带内容** 后，才会重新加载原生入口。
+
+本地 `http://127.0.0.1:4173/` 浏览器预览是开发例外：为了能立即验证动作和点击交互，它会自动加载原生动作但仍隐藏模型自带场景层；追加 `?live2dDebug=1` 可打开开发面板，追加 `?live2dNativeContent=0` 可强制回到 skin-only，追加 `?live2dNativeScene=1` 才显示模型包内场景层。当前 Shimakaze 资源没有 `Expressions`/`.exp3`，因此开发面板会禁用表情按钮并展示可用的原生动作目录；调试面板中的 ARDY 区域可输入描述并直接请求生成，挥手/走路快捷预设使用本地语义缓存，任意新 Prompt 需要配置 Text Encoder 才能命中语义特征。
+
+模型把背景、镜子、粒子等做进 drawable/part 层时，不能只靠删除动作文件。可在包外的 `rayure.local.json` 为 Live2D 模型声明要隐藏的部件：
+
+```json
+{
+  "model": {
+    "id": "shimakaze",
+    "displayName": "Shimakaze",
+    "format": "live2d",
+    "path": "D:\\Models\\Shimakaze\\daofeng_5.model3.json",
+    "skinHiddenPartIds": ["Part45", "Part46", "Part53", "Part54"]
+  }
+}
+```
+
+Companion 也会根据可选 `cdi3.json` 中的背景/地板/镜子/粒子等名称做保守的自动识别；显式 `skinHiddenPartIds` 用于模型专属场景层。这里的“原生内容”指模型包内的动作和场景层，Rayure 自己的桌面场景仍由 Rayure 管理。
+
+Wallpaper Engine 的 `project.json` 属性承担当前设置入口：连接端口、强调色、模型缩放、连接状态、Rayure 品牌信息和模型自带内容导入。旧的桌面动作/表情调试栏及 `debugui` 属性已移除，不把开发按钮嵌入正式壁纸；`live2dDebug=1`、`live2dModelUrl`、`live2dNativeScene=1` 仅保留给开发预检使用。
 
 ## 当前架构
 
@@ -207,10 +233,10 @@ pnpm dev:wallpaper   # 端口 4173
 ```json
 {
   "model": {
-    "id": "hiyori-live2d",
-    "displayName": "Hiyori (Live2D)",
+    "id": "shimakaze-live2d",
+    "displayName": "Shimakaze (Live2D)",
     "format": "live2d",
-    "path": "D:\\...\\Hiyori.model3.json"
+    "path": "D:\\...\\daofeng_5.model3.json"
   },
   "motionSemantic": {
     "cachePath": "D:/.../motion-features.json",
@@ -247,7 +273,7 @@ pnpm dev:wallpaper   # 端口 4173
 - 可由行为层调用 `submitIntent({ ..., target: { entityId: 'tea-cup', joint: 'RightHand', timeMs: 200 } })`；坐标仅形成空间约束，不改变语义 cache key。当前 Bridge 支持 `Hips`、双手和双脚目标，FullBody 约束仍是后续能力；
 - 角色、动作、embedding 缓存、录制和场景素材均被 Git 排除；Renderer 只接收一次性回环 URL，不接收磁盘路径。
 
-调试入口：`?live2dDebug=1`（参数探针）、`?live2dModelUrl=...`（手动指定模型）、`?live2dCoreUrl=...`（Core 来源）。
+调试入口：`?live2dDebug=1`（参数探针、原生动作和 ARDY 生成控件）、`?live2dModelUrl=...`（手动指定模型）、`?live2dCoreUrl=...`（Core 来源）。
 
 ## 私有资产与发布边界
 

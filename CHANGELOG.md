@@ -2,10 +2,19 @@
 
 本项目的所有重要变更都会记录在此文件中。
 
-## [Unreleased] - 2026-08-24
+## [Unreleased] - 2026-08-25
+
+### 本次收尾记录
+
+- 已将当前 Live2D/ARDY 接入代码、协议、Companion、调试页和对应测试保存在本次提交；原生 Cubism 模型加载、原生动作/表达式分流和 Canonical Motion 播放链路已经接线；
+- 当前岛风 model3 实测有 545 个参数，腿脚和部分手臂使用 `Param7/8/9/10/11/12/14/15/16/17/19/79/80/86/286` 等非标准 ID。代码已加入显式 Shimakaze RigProfile，但尚未完成通用 DisplayInfo 导入、自动校准和任意新模型的自动映射；
+- `walk.forward` 可以由 Companion 生成并发布，浏览器面板也能收到 `completed`，但本次停止前没有通过画面验收确认腿脚形成可见步态；根位移只是 2D 预览投影，不能替代模型参数映射；
+- 下一次继续时应先补齐“模型参数定义/DisplayInfo → RigProfile → 映射/缺失诊断 → 逐模型校准”，再在 Wallpaper Engine CEF 中复核真实播放；
+- 私有模型、动作、临时 JSON 和调试截图继续留在工作区/忽略路径，未纳入 Git、`public/`、`dist/` 或发布包。
 
 ### 新增
 
+- 新增外部忽略的 Live2D 岛风（Azur Lane `daofeng_5`）本地测试夹具登记：固定源仓库 commit、22 个被引用资源、Rayure 适配入口和技术评估均保存在 `scratch/live2d-samples/Shimakaze/`，不进入 Git、构建产物或发布资产；
 - 新增 Companion 内部 `BehaviorOrchestrator` 与 `rayure.behavior-event.v1` / `rayure.behavior-plan.v1` 基础类型，统一视觉、语音和直接指令的优先级、过期、去重、抢占取消与 generation 隔离；
 - 新增 `rayure.vision-observation.v1` 派生观察合同与 `VisionEventDetector`：在 Companion 内以迟滞、连续帧和冷却窗口识别 presence、头部方向、举手和挥手，不接收原始摄像头帧；
 - 新增 `VisionProcessClient` 与 `scripts/mediapipe-vision-bridge.py`：Bridge 使用 `shell:false`、16 KiB 行上限、受限诊断和失败关闭；Python 侧提供无依赖 `--simulate` 回归模式，并以 MediaPipe LIVE_STREAM 读取包外模型和摄像头后只输出派生观察；
@@ -20,18 +29,30 @@
 - 新增 Renderer → Companion 的 `motion.playback` 协议回执：仅当前已发布的动作描述符可上报有界、单调的 source-frame 进度；
 - 新增 Bridge 续写令牌合同和 `SceneEntityRegistry`：场景实体坐标经显式原点/比例变换后，可作为 `Hips`、双手、双脚的 ARDY 运动学目标，而语义 cache key 保持不变；
 - Bridge 结果现在携带不透明 continuation id；真实 ARDY Core 已验证带右手约束的 8 帧生成及使用同一语义特征的连续续写；
-- 新增生成动作根位移的 2D 画布投影、Hiyori `ParamLeg` 步态映射，以及 20 fps Canonical Motion 的帧间 lerp/slerp；
+- 新增生成动作根位移的 2D 画布投影、Live2D `ParamLeg` 步态映射，以及 20 fps Canonical Motion 的帧间 lerp/slerp；
 - 新增 `MotionIdlePool` 与 `motionSemantic.idlePool` 配置：按 round-robin 选择待机动作，在 lookahead 窗口预取下一段，并在 handoff 窗口提交；直接语音/视觉动作会取消过期预取；
 - 新增 `MotionScheduler.prefetch()` / `commitPrefetch()` / `discardPrefetch()`：预取段不覆盖当前播放 buffer，发布失败时恢复已确认的当前段；晚加入的 Wallpaper 客户端会收到最近一次 `motion.published`；
 - 新增 Renderer `parameter-crossfade` 工具及测试：生成 Canonical Motion 交接从当前真实参数姿态平滑过渡，默认 180 ms；
+- 新增 Live2D skin-only 入口：Companion 为模型生成不含 `Motions` 的默认入口，并保留仅在显式导入时使用的原生入口；原生动作文件不会在默认加载阶段被渲染器批量拉取；
+- 新增 Live2D 原生 `Expressions` 接入：skin-only 入口保留表达式资源并启用 Cubism expression manager，支持文件名/路径及中英日语义别名解析；`expression.set/reset` 与带表达式的 `emote.play` 会分流到原生表面，未知表情安全降级；协议的零权重表示重置，正权重触发原生 exp3，具体权重与过渡时序由模型自带 Cubism fade 控制；
+- 新增 Live2D `skinHiddenPartIds` 配置与 `cdi3.json` 场景部件保守识别：可隐藏背景、镜子、地板、粒子等 drawable/part，同时把模型本体保留为 Rayure 的伴侣皮套；
+- 新增 Wallpaper Engine 属性：默认隐藏品牌和连接状态，可在属性面板导入模型自带动作/场景层；
+- 新增浏览器 Live2D 预览交互：回环开发页默认加载原生动作但隐藏模型场景层，点击角色头部/身体会按模型动作组触发 `touch_head`/`touch_body`，`?live2dDebug=1` 提供背景、原生动作、场景层、表情和动作目录控制；
+- 新增仅在 `?live2dDebug=1` 显示的 ARDY 生成控制：支持输入动作描述、挥手/走路缓存预设、通过回环 WebSocket 请求 `MotionGenerationController`，并展示接受、失败、发布和播放状态；
 
 ### 变更
 
+- Live2D 调试页在原生 Cubism 模型与参数探针并行运行时，以原生模型快照为准，避免测试夹具每帧覆盖“模型已加载”和当前原生动作状态；
 - `MotionScheduler` 生产路径不再自行伪造时钟：下一段只使用 Renderer 已确认的前缀；抢占会取消生成器实际收到的 signal，发布回调失败会回滚未观察 buffer；
 - `MotionScheduler` 现在把预测生成和交接提交分离；待机池只在剩余时间进入 lookahead/handoff 窗口后生成/发布，避免预取结果提前打断当前动作；
 - Live2D 的 native motion、generated Canonical Motion 和 debug fixture 改为互斥参数写入者。生成开始从当前参数 180 ms 混合，结束/取消后优先恢复原生 Idle；一次性 Idle 结束时会经防抖保护重新进入默认待机；
 - Bridge 使用 ARDY 官方 `Root2DConstraintSet` / `EndEffectorConstraintSet` 生成 `observed_motion` 与 `motion_mask`，并为 EndEffector 条件补齐必需的 `Hips` 行；
 - 冻结的 PMX/MMD 主机按需加载；`three-mmd-loader` 的 Node-only 可选分支改为显式浏览器诊断 stub，生产构建不再出现 browser-external 告警，最大 JS 分块降至 380 kB；
+- Live2D 原生动作不再自动播放；默认模型入口只负责皮套、参数、物理和 Rayure 自己的交互，勾选原生内容后才以新入口重新加载动作与模型场景部件；
+- Wallpaper Engine 的用户设置继续由 `project.json` 属性承载；旧的桌面动作/表情调试栏及 `debugui` 属性已移除，显式查询参数只保留给开发预检，桌面默认不再嵌入 Rayure 品牌、连接状态和调试按钮；
+- 清理未被当前运行链路引用的 Hiyori 样例、旧 `live2d-renderer` 调试包和归档压缩包，并将其移入被忽略的 `scratch/_retired-live2d/` 隔离目录；当前本机验收资源统一使用岛风；
+- 将实际运行的 `Live2dNativeDebugSurface` 重命名为 `Live2dNativeSurface`，并把诊断面板、Canvas 类名和快照类型从生产“调试表面”命名中剥离；显式 `live2dDebug` 查询和参数探针仍保持开发专用边界；
+- Live2D 可选房间背景改为保持方形贴图比例的裁切平面，移除会产生底部白块的独立地板，并在默认 Live2D 皮套视图中隐藏环境层；
 
 ### 修复
 
@@ -40,10 +61,16 @@
 - 修复约束 index tensor 的 CPU/CUDA 设备错配、EndEffector 缺少 Hips 条件导致的断言失败，以及多行 Bridge 错误无法通过 JSONL 合同的问题；
 - 修复 Vite 将 `node:fs/promises` 与 `node:url` 外置到浏览器 bundle 的构建告警。
 - 修复 `speech.liveTalker.motionByKeyword` 对非字符串动作意图的校验漏洞，避免数字等可强制转换值绕过配置边界。
+- 修复模型自带背景与角色同属一个 Live2D MOC 时无法仅导入皮套的问题：默认按 part opacity 隐藏已识别/配置的源场景层，显式导入后恢复；
+- 修复 Live2D 调试页只列出 `motion.catalog` 原生动作、且在模型加载期间丢弃 `motion.published` ARDY 动作的问题：现在显示最近一次 Canonical Motion，并在画布就绪后排队播放；
 
 ### 验证
 
-- 协议 21 项、Companion 118 项、Wallpaper 62 项测试通过；TypeScript、四条 Python bridge 编译、生产构建、依赖审计和发布边界检查通过；
+- 已用本地 Chromium 实际加载岛风模型：Wallpaper Engine skin-only 属性路径只保留角色并隐藏源场景层，网络记录无 `.motion3.json` 请求；开发预览路径可恢复原生动作目录，`touch_head` 原生动作可见，控制台无错误；
+- 已用本地 Edge/Chromium 预检验证：普通回环预览角色可见、无拉伸房间背景，鼠标点击头部/身体分别触发 `touch_head`/`touch_body`；`?live2dDebug=1` 面板显示 17 个原生动作，当前模型无 `Expressions` 时表情按钮安全禁用；
+- 已用本地 Edge 实际验证 `?live2dDebug=1`：ARDY 的 `walk.forward-2` 先显示为 queued，Live2D 就绪后完成播放，面板提供最近动作重播且控制台无错误；
+- 已用本地 Edge 在调试页点击“填入挥手”→“让 ARDY 生成”：请求 `wave.casual` 被 Companion 接受，`wave.casual-5` 进入播放并完成，参数快照发生变化；
+- 相关协议、Companion、Wallpaper 测试与 TypeScript 检查通过；完整 `verify.ps1`、生产构建、依赖审计和发布边界检查仍作为最终交付门禁；
 - 发布边界仍保持：私有模型、动作、场景、缓存和本地配置不会进入 Git 或 Wallpaper `dist`。Wallpaper Engine CEF 的新生成播放视觉/DevTools 门禁仍单独保留。
 
 ## [0.6.0-dev] - 2026-08-23

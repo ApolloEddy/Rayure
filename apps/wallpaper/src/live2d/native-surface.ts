@@ -18,6 +18,10 @@ import { Live2dMotionController } from './motion-controller.ts'
 import type { Live2dMotionModelLike } from './motion-controller.ts'
 import { Live2dMotionPlayer } from './motion-player.ts'
 import type { Live2dParameterSink } from './rig-profile.ts'
+import { resolveLive2dRigProfile } from './rig-profile.ts'
+import {
+  Live2dExpressionController,
+} from './expression-controller.ts'
 import {
   createParameterCrossfade,
   sampleParameterCrossfade,
@@ -41,27 +45,39 @@ interface NativeLive2dModel {
   ): Promise<unknown>
   stopMotions(): void
   getMotions?(): readonly string[]
+  getExpressions?(): readonly string[]
+  setExpression?(expression: string): void
+  expressionManager?: { stopAllMotions(): void }
   setParameter(parameterId: string, value: number): void
+  setPartOpacity?(partId: string, opacity: number): void
   getParameterNames?(): readonly string[]
   getParameterValue?(parameterId: string): number
 }
 
-export interface Live2dNativeDebugSnapshot {
+export interface Live2dNativeSnapshot {
   mode: 'native-cubism'
   nativeModelLoaded: boolean
   modelUrl: string
   coreUrl: string
   parameterIds: readonly string[]
   parameters: Readonly<Record<string, number>>
+  expressionIds: readonly string[]
+  activeExpressionId?: string
   activeMotionId?: string
   activeGeneratedMotionId?: string
   detail?: string
 }
 
-export interface Live2dNativeDebugSurfaceOptions {
+export interface Live2dNativeSurfaceOptions {
   modelUrl: string
   coreUrl?: string
-  onSnapshot?: (snapshot: Live2dNativeDebugSnapshot) => void
+  /** Enable the synthetic Canonical Motion fixture only for explicit debug runs. */
+  debugFallback?: boolean
+  /** Parts belonging to a source scene/effect layer, hidden in skin-only mode. */
+  skinHiddenPartIds?: readonly string[]
+  /** Show source scene/effect parts for an explicit native-content import. */
+  showNativeParts?: boolean
+  onSnapshot?: (snapshot: Live2dNativeSnapshot) => void
   onGeneratedMotionPlayback?: (observation: {
     motionId: string
     phase: 'started' | 'progress' | 'completed' | 'cancelled'
@@ -69,19 +85,37 @@ export interface Live2dNativeDebugSurfaceOptions {
   }) => void
 }
 
+export function selectLive2dInteractionMotion(
+  motions: readonly Live2dMotionDescriptor[],
+  verticalRatio: number,
+): Live2dMotionDescriptor | undefined {
+  const preferredGroups = verticalRatio < 0.46
+    ? ['touch_head', 'taphead', 'head']
+    : ['touch_body', 'tapbody', 'body']
+  for (const group of preferredGroups) {
+    const match = motions.find(motion => motion.group.trim().toLocaleLowerCase() === group)
+    if (match !== undefined) return match
+  }
+  return motions.find(motion => motion.group.trim().toLocaleLowerCase().startsWith(preferredGroups[0]!))
+}
+
 /**
- * Dev-only native Cubism surface. It is deliberately opt-in and receives a
- * tokenized or local model URL from the query string/Companion so no private
- * model path or model bytes are placed in the application bundle.
+ * Native Cubism surface. It receives a tokenized or local model URL from
+ * Companion or an explicit developer query, so no private model path or model
+ * bytes are placed in the application bundle.
  */
-export class Live2dNativeDebugSurface implements Live2dParameterSink {
+export class Live2dNativeSurface implements Live2dParameterSink {
   readonly #container: HTMLElement
   readonly #modelUrl: string
   readonly #coreUrl: string
-  readonly #onSnapshot: ((snapshot: Live2dNativeDebugSnapshot) => void) | undefined
-  readonly #onGeneratedMotionPlayback: Live2dNativeDebugSurfaceOptions['onGeneratedMotionPlayback']
+  readonly #debugFallbackEnabled: boolean
+  readonly #skinHiddenPartIds: readonly string[]
+  readonly #showNativeParts: boolean
+  readonly #onSnapshot: ((snapshot: Live2dNativeSnapshot) => void) | undefined
+  readonly #onGeneratedMotionPlayback: Live2dNativeSurfaceOptions['onGeneratedMotionPlayback']
   readonly #motion = createLive2dDebugMotion()
   readonly #nativeMotion = new Live2dMotionController()
+  readonly #expression = new Live2dExpressionController()
   #canvas: HTMLCanvasElement | undefined
   #model: NativeLive2dModel | undefined
   #modelReady = false
@@ -103,13 +137,17 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
   #canvasMotionOffset = { x: 0, y: 0 }
   #speechMouthValue = 0
   #speechMouthParameterId: string | undefined
+  #pointerDownAt: { x: number, y: number } | undefined
   #disposed = false
 
-  constructor(container: HTMLElement, options: Live2dNativeDebugSurfaceOptions) {
-    if (!options.modelUrl || !options.modelUrl.trim()) throw new Error('Live2D native debug model URL is required')
+  constructor(container: HTMLElement, options: Live2dNativeSurfaceOptions) {
+    if (!options.modelUrl || !options.modelUrl.trim()) throw new Error('Live2D native model URL is required')
     this.#container = container
     this.#modelUrl = options.modelUrl
     this.#coreUrl = resolveLive2dCoreUrl(options.coreUrl, window.location.href) ?? DEFAULT_LIVE2D_CORE_URL
+    this.#debugFallbackEnabled = options.debugFallback === true
+    this.#skinHiddenPartIds = [...new Set(options.skinHiddenPartIds ?? [])]
+    this.#showNativeParts = options.showNativeParts === true
     this.#onSnapshot = options.onSnapshot
     this.#onGeneratedMotionPlayback = options.onGeneratedMotionPlayback
   }
@@ -123,6 +161,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
       coreUrl: this.#coreUrl,
       parameterIds: [],
       parameters: {},
+      expressionIds: [],
       detail: 'Loading Cubism Core and model',
     })
     try {
@@ -138,10 +177,12 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
 
       const { Live2DCubismModel } = await import('live2d-renderer')
       const canvas = document.createElement('canvas')
-      canvas.className = 'live2d-native-debug-canvas'
-      canvas.setAttribute('aria-label', 'Live2D native debug model')
+      canvas.className = 'live2d-native-canvas'
+      canvas.setAttribute('aria-label', 'Live2D native model')
       this.#container.append(canvas)
       this.#canvas = canvas
+      canvas.addEventListener('pointerdown', this.#onPointerDown, { passive: true })
+      canvas.addEventListener('pointerup', this.#onPointerUp, { passive: true })
       if (typeof ResizeObserver !== 'undefined') {
         this.#resizeObserver = new ResizeObserver(() => this.#resize())
         this.#resizeObserver.observe(this.#container)
@@ -150,24 +191,42 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
 
       const model = new Live2DCubismModel(canvas, {
         autoAnimate: false,
-        autoInteraction: false,
-        tapInteraction: false,
+        autoInteraction: true,
+        tapInteraction: true,
         randomMotion: false,
+        // The library's keepAspect mode crops this full-viewport canvas and
+        // shifts the model on wide windows. Its projection already handles
+        // the viewport aspect when keepAspect is disabled.
         keepAspect: false,
+        zoomEnabled: true,
+        enablePan: true,
         cubismCorePath: this.#coreUrl,
         enableMotion: false,
-        enableExpression: false,
+        enableExpression: true,
         enableLipsync: false,
       }) as unknown as NativeLive2dModel
       this.#model = model
       await model.load(this.#modelUrl)
       if (this.#disposed) return false
+      this.#expression.bindModel({
+        getExpressions: () => model.getExpressions?.() ?? [],
+        setExpression: (expression) => {
+          if (model.setExpression === undefined) throw new Error('Live2D expression API is unavailable')
+          model.setExpression(expression)
+        },
+        stopExpressions: () => {
+          if (model.expressionManager === undefined) throw new Error('Live2D expression manager is unavailable')
+          model.expressionManager.stopAllMotions()
+        },
+      })
       this.#modelReady = true
+      this.#applySkinPartVisibility(model)
       this.#nativeMotion.bindModel(model)
       this.#parameterIds = [...(model.getParameterNames?.() ?? [])]
       this.#speechMouthParameterId = this.#parameterIds.find(parameterId => /mouth.*open|open.*mouth|mouthopeny/iu.test(parameterId))
-      this.#player = new Live2dMotionPlayer(this)
-      this.#generatedMotion = new CanonicalMotionPlayer(this)
+      const rigProfile = resolveLive2dRigProfile(this.#parameterIds)
+      this.#player = new Live2dMotionPlayer(this, rigProfile)
+      this.#generatedMotion = new CanonicalMotionPlayer(this, rigProfile)
       window.addEventListener('resize', this.#resize, { passive: true })
       this.#lastRenderedAt = performance.now()
       this.#animationFrame = requestAnimationFrame(this.#render)
@@ -184,6 +243,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
         coreUrl: this.#coreUrl,
         parameterIds: [],
         parameters: {},
+        expressionIds: [],
         detail,
       })
       this.dispose()
@@ -192,12 +252,29 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
   }
 
   setParameterValue(parameterId: string, value: number): void {
-    if (this.#disposed || !this.#modelReady || !this.#model || !parameterId || !Number.isFinite(value)) return
+    if (
+      this.#disposed
+      || !this.#modelReady
+      || !this.#model
+      || !parameterId
+      || !Number.isFinite(value)
+      || !this.#parameterIds.includes(parameterId)
+    ) return
     const appliedValue = this.#parameterOwner === 'generated'
       ? this.#blendGeneratedParameter(parameterId, value)
       : value
     this.#model.setParameter(parameterId, appliedValue)
     this.#parameters.set(parameterId, appliedValue)
+  }
+
+  setExpression(name: string, weight: number, durationMs?: number): boolean {
+    if (this.#disposed || !this.#modelReady || !this.#model) return false
+    return this.#expression.setExpression(name, weight, durationMs)
+  }
+
+  resetExpression(durationMs?: number): boolean {
+    if (this.#disposed || !this.#modelReady || !this.#model) return false
+    return this.#expression.reset(durationMs)
   }
 
   onMotionFrame(frame: CanonicalMotionFrame): void {
@@ -217,7 +294,19 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
 
   updateMotionCatalog(motions: readonly MotionDescriptor[]): void {
     if (this.#disposed) return
-    this.#motionCatalog = motions.filter((motion): motion is Live2dMotionDescriptor => motion.format === 'live2d')
+    const nextCatalog = motions.filter((motion): motion is Live2dMotionDescriptor => motion.format === 'live2d')
+    this.#motionCatalog = nextCatalog
+    if (nextCatalog.length === 0 && this.#nativeMotion.isPlaying) this.disableNativeMotion()
+  }
+
+  /** Stop source motions without starting the development-only fixture. */
+  disableNativeMotion(): void {
+    if (this.#disposed) return
+    this.#nativeMotion.stopMotion()
+    if (this.#parameterOwner === 'native') {
+      this.#parameterOwner = 'none'
+      this.#parameterBlend = undefined
+    }
   }
 
   playMotion(descriptor: MotionDescriptor): Promise<boolean> {
@@ -240,6 +329,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
     const defaultMotion = this.#motionCatalog.find(motion => motion.group.toLowerCase() === 'idle')
       ?? this.#motionCatalog[0]
     if (defaultMotion !== undefined) return this.playMotion(defaultMotion)
+    if (!this.#debugFallbackEnabled) return Promise.resolve(false)
     this.#startDebugFallback()
     return Promise.resolve(true)
   }
@@ -250,7 +340,9 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
       if (motionId !== undefined) return
     }
     this.#nativeMotion.stopMotion(motionId)
-    if (!this.#generatedMotion?.isPlaying && !this.#nativeMotion.isPlaying) this.#startDebugFallback()
+    if (this.#debugFallbackEnabled && !this.#generatedMotion?.isPlaying && !this.#nativeMotion.isPlaying) {
+      this.#startDebugFallback()
+    }
   }
 
   /**
@@ -309,7 +401,9 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
     try {
       this.#resetGeneratedRootOffset()
       const restored = await this.playDefaultMotion()
-      if (!restored && !this.#disposed && !this.#generatedMotion?.isPlaying) this.#startDebugFallback()
+      if (!restored && this.#debugFallbackEnabled && !this.#disposed && !this.#generatedMotion?.isPlaying) {
+        this.#startDebugFallback()
+      }
     }
     finally {
       this.#idleRestorePending = false
@@ -317,7 +411,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
   }
 
   #startDebugFallback(): void {
-    if (this.#disposed || !this.#player || this.#generatedMotion?.isPlaying) return
+    if (!this.#debugFallbackEnabled || this.#disposed || !this.#player || this.#generatedMotion?.isPlaying) return
     this.#nativeMotion.stopMotion()
     this.#resetGeneratedRootOffset()
     this.#parameterOwner = 'debug'
@@ -326,6 +420,21 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
       this.#player.bind(this.#motion)
       this.#player.advance(0)
     }
+  }
+
+  #applySkinPartVisibility(model: NativeLive2dModel): void {
+    if (this.#showNativeParts || this.#skinHiddenPartIds.length === 0 || model.setPartOpacity === undefined) return
+    const partIds = (model as unknown as { parts?: { ids?: readonly string[] } }).parts?.ids
+    for (const partId of this.#skinHiddenPartIds) {
+      if (partIds !== undefined && !partIds.includes(partId)) continue
+      try {
+        model.setPartOpacity(partId, 0)
+      }
+      catch {
+        // A model-specific part may be absent in a later revision; keep the skin usable.
+      }
+    }
+    model.update()
   }
 
   #captureParameterValues(): ReadonlyMap<string, number> {
@@ -354,7 +463,12 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
       this.#generatedRootAnchorOffset = { ...this.#canvasMotionOffset }
     }
     const origin = this.#generatedRootOrigin
-    const pixelsPerWorldUnit = Math.min(this.#container.clientWidth, this.#container.clientHeight) * 0.12
+    // ARDY world-space root deltas are centimetre-scale.  The old 0.12
+    // multiplier turned a normal walk into a 1–2 px nudge on a 720 px stage;
+    // this projection is deliberately calibrated for a 2D Live2D preview so
+    // the generated forward/bob cue is visible without treating the canvas as
+    // a 3D renderer.
+    const pixelsPerWorldUnit = Math.min(this.#container.clientWidth, this.#container.clientHeight) * 1.8
     const maxX = this.#container.clientWidth * 0.3
     const maxY = this.#container.clientHeight * 0.22
     const x = clampCanvasOffset(this.#generatedRootAnchorOffset.x + (rootPosition[0] - origin[0]) * pixelsPerWorldUnit, maxX)
@@ -397,7 +511,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
     }
   }
 
-  snapshot(): Live2dNativeDebugSnapshot {
+  snapshot(): Live2dNativeSnapshot {
     return this.#snapshot()
   }
 
@@ -409,8 +523,11 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
     window.removeEventListener('resize', this.#resize)
     this.#resizeObserver?.disconnect()
     this.#resizeObserver = undefined
+    this.#canvas?.removeEventListener('pointerdown', this.#onPointerDown)
+    this.#canvas?.removeEventListener('pointerup', this.#onPointerUp)
     this.#modelReady = false
     this.#nativeMotion.dispose()
+    this.#expression.dispose()
     this.#player?.dispose()
     this.#player = undefined
     this.#generatedMotion?.dispose()
@@ -481,7 +598,26 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
     this.#model.resize()
   }
 
-  #snapshot(): Live2dNativeDebugSnapshot {
+  readonly #onPointerDown = (event: PointerEvent): void => {
+    if (!event.isPrimary || this.#disposed) return
+    this.#pointerDownAt = { x: event.clientX, y: event.clientY }
+  }
+
+  readonly #onPointerUp = (event: PointerEvent): void => {
+    const start = this.#pointerDownAt
+    this.#pointerDownAt = undefined
+    if (!event.isPrimary || start === undefined || this.#disposed || !this.isReady) return
+    const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y)
+    if (moved > 18) return
+    const canvas = this.#canvas
+    if (canvas === undefined) return
+    const rect = canvas.getBoundingClientRect()
+    const verticalRatio = (event.clientY - rect.top) / Math.max(1, rect.height)
+    const motion = selectLive2dInteractionMotion(this.#motionCatalog, verticalRatio)
+    if (motion !== undefined) void this.playMotion(motion)
+  }
+
+  #snapshot(): Live2dNativeSnapshot {
     const parameters: Record<string, number> = {}
     for (const parameterId of this.#parameterIds.slice(0, 24)) {
       const value = this.#model?.getParameterValue?.(parameterId) ?? this.#parameters.get(parameterId)
@@ -494,6 +630,8 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
       coreUrl: this.#coreUrl,
       parameterIds: this.#parameterIds,
       parameters,
+      expressionIds: [...(this.#model?.getExpressions?.() ?? [])],
+      ...(this.#expression.activeExpressionId === undefined ? {} : { activeExpressionId: this.#expression.activeExpressionId }),
       ...(this.#nativeMotion.activeMotionId === undefined ? {} : { activeMotionId: this.#nativeMotion.activeMotionId }),
       ...(this.#generatedMotion?.activeDescriptor === undefined
         ? {}
@@ -501,7 +639,7 @@ export class Live2dNativeDebugSurface implements Live2dParameterSink {
     }
   }
 
-  #emit(snapshot: Live2dNativeDebugSnapshot): void {
+  #emit(snapshot: Live2dNativeSnapshot): void {
     try {
       this.#onSnapshot?.(snapshot)
     }

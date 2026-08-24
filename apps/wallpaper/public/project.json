@@ -31,7 +31,19 @@
         "order": 4,
         "text": "ui_rayure_show_status",
         "type": "bool",
-        "value": true
+        "value": false
+      },
+      "showbranding": {
+        "order": 5,
+        "text": "ui_rayure_show_branding",
+        "type": "bool",
+        "value": false
+      },
+      "importnativecontent": {
+        "order": 6,
+        "text": "ui_rayure_import_native_content",
+        "type": "bool",
+        "value": false
       }
     },
     "localization": {
@@ -39,13 +51,17 @@
         "ui_rayure_accent_color": "Accent color",
         "ui_rayure_companion_port": "Companion port",
         "ui_rayure_model_scale": "Model scale",
-        "ui_rayure_show_status": "Show connection status"
+        "ui_rayure_show_status": "Show connection status",
+        "ui_rayure_show_branding": "Show Rayure branding",
+        "ui_rayure_import_native_content": "Import model-native content"
       },
       "zh-chs": {
         "ui_rayure_accent_color": "强调色",
         "ui_rayure_companion_port": "Companion 端口",
         "ui_rayure_model_scale": "模型缩放",
-        "ui_rayure_show_status": "显示连接状态"
+        "ui_rayure_show_status": "显示连接状态",
+        "ui_rayure_show_branding": "显示 Rayure 品牌信息",
+        "ui_rayure_import_native_content": "导入模型自带内容"
       }
     }
   },

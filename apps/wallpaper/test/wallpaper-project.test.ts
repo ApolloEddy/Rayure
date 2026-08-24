@@ -36,7 +36,14 @@ test('project.json declares an official-compatible self-contained Web wallpaper'
   assert.ok(project.description.length > 0)
 
   const properties = project.general.properties
-  assert.deepEqual(Object.keys(properties), ['accentcolor', 'companionport', 'modelscale', 'showstatus'])
+  assert.deepEqual(Object.keys(properties), [
+    'accentcolor',
+    'companionport',
+    'modelscale',
+    'showstatus',
+    'showbranding',
+    'importnativecontent',
+  ])
   assert.deepEqual(properties.accentcolor, {
     order: 1,
     text: 'ui_rayure_accent_color',
@@ -65,7 +72,19 @@ test('project.json declares an official-compatible self-contained Web wallpaper'
     order: 4,
     text: 'ui_rayure_show_status',
     type: 'bool',
-    value: true,
+    value: false,
+  })
+  assert.deepEqual(properties.showbranding, {
+    order: 5,
+    text: 'ui_rayure_show_branding',
+    type: 'bool',
+    value: false,
+  })
+  assert.deepEqual(properties.importnativecontent, {
+    order: 6,
+    text: 'ui_rayure_import_native_content',
+    type: 'bool',
+    value: false,
   })
 })
 
@@ -86,4 +105,9 @@ test('project metadata contains no private model path, model payload or Workshop
   assert.equal('official' in project, false)
   assert.equal('workshopid' in project, false)
   assert.doesNotMatch(raw, /StereoModelPlugin|2086|胡桃|\.pmx|\.fbx|\.blend|[A-Za-z]:[\\/]/iu)
+})
+
+test('wallpaper page does not embed the retired desktop action debug toolbar', async () => {
+  const raw = await readFile(new URL('../index.html', import.meta.url), 'utf8')
+  assert.doesNotMatch(raw, /debug-toolbar|debug-toggle|动作调试|复合动作|面部微表情|data-emote|data-expr/iu)
 })

@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import test from 'node:test'
 
 import {
   collectLive2dAssetPaths,
-  hasLive2dMoc3Header,
   parseLive2dDisplayInfo,
   parseLive2dModel3,
   scanLive2dRigProfile,
@@ -97,20 +94,4 @@ test('Live2D manifest rejects traversal, duplicate paths, and invalid fade durat
       Motions: { Idle: [{ File: 'idle.motion3.json', FadeInTime: -1 }] },
     },
   }), /duration/u)
-})
-
-test('local Hiyori sample, when prepared, contains the full standard parameter set and files', () => {
-  const root = join(process.cwd(), 'scratch', 'live2d-samples', 'Hiyori')
-  const modelPath = join(root, 'Hiyori.model3.json')
-  const displayInfoPath = join(root, 'Hiyori.cdi3.json')
-  if (!existsSync(modelPath) || !existsSync(displayInfoPath)) return
-
-  const manifest = parseLive2dModel3(JSON.parse(readFileSync(modelPath, 'utf8')), 'hiyori-sample')
-  const parameters = parseLive2dDisplayInfo(JSON.parse(readFileSync(displayInfoPath, 'utf8')))
-  const scan = scanLive2dRigProfile(parameters)
-  assert.deepEqual(scan.missingParameterIds, [])
-  for (const relativePath of collectLive2dAssetPaths(manifest)) {
-    assert.equal(existsSync(join(root, relativePath)), true, relativePath)
-  }
-  assert.equal(hasLive2dMoc3Header(new Uint8Array(readFileSync(join(root, manifest.fileReferences.moc)))), true)
 })

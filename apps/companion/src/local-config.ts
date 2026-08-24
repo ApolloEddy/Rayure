@@ -185,7 +185,9 @@ export async function loadLocalConfig(
   let resolvedModel: CompanionModelSource | undefined
   if (root.model !== undefined) {
     const model = requireRecord(root.model, 'model')
-    requireExactKeys(model, ['id', 'displayName', 'format', 'path'], 'model')
+    const modelKeys = ['id', 'displayName', 'format', 'path']
+    if (model.skinHiddenPartIds !== undefined) modelKeys.push('skinHiddenPartIds')
+    requireExactKeys(model, modelKeys, 'model')
     const id = requireIdentifier(model.id)
     const displayName = requireDisplayName(model.displayName)
     if (model.format !== 'pmx' && model.format !== 'live2d') {
@@ -195,12 +197,24 @@ export async function loadLocalConfig(
     const configuredPath = format === 'pmx'
       ? requireAbsolutePmxPath(model.path)
       : requireAbsoluteLive2dPath(model.path)
+    const skinHiddenPartIds = model.skinHiddenPartIds === undefined
+      ? undefined
+      : requireSkinHiddenPartIds(model.skinHiddenPartIds)
+    if (format === 'pmx' && skinHiddenPartIds !== undefined) {
+      throw new Error('skinHiddenPartIds are only supported for Live2D models')
+    }
 
     try {
       const entryFilePath = await realpath(configuredPath)
       const metadata = await stat(entryFilePath)
       if (!metadata.isFile()) throw new Error('path is not a regular file')
-      resolvedModel = { id, displayName, format, entryFilePath }
+      resolvedModel = {
+        id,
+        displayName,
+        format,
+        entryFilePath,
+        ...(skinHiddenPartIds === undefined ? {} : { skinHiddenPartIds }),
+      }
     }
     catch (cause) {
       const label = format === 'live2d' ? 'Live2D model3' : 'PMX'
@@ -597,6 +611,26 @@ function requireDisplayName(value: unknown): string {
     throw new Error('Configured model displayName must be a trimmed printable string up to 96 characters')
   }
   return value
+}
+
+function requireSkinHiddenPartIds(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.length > 512) {
+    throw new Error('Configured skinHiddenPartIds must be an array with at most 512 entries')
+  }
+  const ids = value.map((entry, index) => {
+    if (
+      typeof entry !== 'string'
+      || entry.length < 1
+      || entry.length > 128
+      || entry.trim() !== entry
+      || /[\u0000-\u001F\u007F]/u.test(entry)
+    ) {
+      throw new Error(`Configured skinHiddenPartIds[${index}] must be a trimmed printable identifier`)
+    }
+    return entry
+  })
+  if (new Set(ids).size !== ids.length) throw new Error('Configured skinHiddenPartIds must not contain duplicates')
+  return ids
 }
 
 function requirePrompt(value: unknown): string {

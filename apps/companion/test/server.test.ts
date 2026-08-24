@@ -10,6 +10,7 @@ import WebSocket from 'ws'
 import {
   PROTOCOL_VERSION,
   createClientHello,
+  createClientMotionGenerate,
   createClientMotionPlayback,
   parseServerMessage,
 } from '@rayure/protocol'
@@ -114,6 +115,36 @@ test('a welcomed renderer can report bounded generated-motion progress without r
   assert.equal(socket.readyState, WebSocket.OPEN)
 })
 
+test('a welcomed renderer can request one debug ARDY generation and receive acceptance', async (t) => {
+  let observed: { id: string, prompt: string } | undefined
+  const server = createCompanionServer({
+    port: 0,
+    helloTimeoutMs: 500,
+    onMotionGenerate: input => {
+      observed = { id: input.id, prompt: input.prompt }
+    },
+  })
+  const address = await server.start()
+  t.after(() => server.stop())
+
+  const socket = new WebSocket(`ws://${address.host}:${address.port}/ws`)
+  t.after(() => socket.close())
+  await once(socket, 'open')
+  socket.send(JSON.stringify(createClientHello({ id: 'hello-generate', build: 'test' })))
+  await once(socket, 'message')
+
+  const request = createClientMotionGenerate({ id: 'generate-1', prompt: 'A person waves their hand casually' })
+  socket.send(JSON.stringify(request))
+  const [data] = await once(socket, 'message')
+  const status = parseServerMessage(data.toString())
+  assert.equal(status.type, 'motion.generate.status')
+  if (status.type !== 'motion.generate.status') assert.fail('expected motion generation status')
+  assert.equal(status.replyTo, request.id)
+  assert.equal(status.payload.phase, 'accepted')
+  assert.deepEqual(observed, { id: request.id, prompt: request.payload.prompt })
+  assert.equal(socket.readyState, WebSocket.OPEN)
+})
+
 test('start and stop are idempotent and terminal state is observable', async () => {
   const server = createCompanionServer({ port: 0 })
   const first = await server.start()
@@ -195,9 +226,13 @@ test('authorized clients receive a tokenized Live2D model3 package', async (t) =
   t.after(() => rm(assetRoot, { recursive: true, force: true }))
   await mkdir(join(assetRoot, 'Hiyori.2048'))
   await mkdir(join(assetRoot, 'motions'))
+  await mkdir(join(assetRoot, 'expressions'))
   const modelBytes = Buffer.from(JSON.stringify({
     Version: 3,
     FileReferences: {
+      Expressions: [
+        { Name: 'Smile', File: 'expressions/smile.exp3.json' },
+      ],
       Motions: {
         Idle: [{ File: 'motions/Hiyori_m01.motion3.json' }],
       },
@@ -206,10 +241,12 @@ test('authorized clients receive a tokenized Live2D model3 package', async (t) =
   const mocBytes = Buffer.from([0x4d, 0x4f, 0x43, 0x33])
   const textureBytes = Buffer.from([137, 80, 78, 71])
   const motionBytes = Buffer.from('{"Version":3}')
+  const expressionBytes = Buffer.from('{"FadeInTime":0.2,"Parameters":[]}')
   await writeFile(join(assetRoot, 'Hiyori.model3.json'), modelBytes)
   await writeFile(join(assetRoot, 'Hiyori.moc3'), mocBytes)
   await writeFile(join(assetRoot, 'Hiyori.2048', 'texture_00.png'), textureBytes)
   await writeFile(join(assetRoot, 'motions', 'Hiyori_m01.motion3.json'), motionBytes)
+  await writeFile(join(assetRoot, 'expressions', 'smile.exp3.json'), expressionBytes)
   await writeFile(join(assetRoot, 'source.blend'), 'private source')
 
   const server = createCompanionServer({
@@ -246,6 +283,8 @@ test('authorized clients receive a tokenized Live2D model3 package', async (t) =
   if (modelMessage.type !== 'model.available') assert.fail('expected model.available')
   assert.equal(modelMessage.payload.model.format, 'live2d')
   assert.equal(modelMessage.payload.model.url.includes(assetRoot), false)
+  assert.ok(modelMessage.payload.model.nativeUrl)
+  assert.equal(modelMessage.payload.model.nativeUrl?.includes(assetRoot), false)
 
   const catalogMessage = parseServerMessage(catalogData.toString())
   assert.equal(catalogMessage.type, 'motion.catalog')
@@ -261,8 +300,20 @@ test('authorized clients receive a tokenized Live2D model3 package', async (t) =
 
   const modelResponse = await fetch(modelMessage.payload.model.url, { headers: { Origin: 'null' } })
   assert.equal(modelResponse.status, 200)
-  assert.deepEqual(Buffer.from(await modelResponse.arrayBuffer()), modelBytes)
+  const skinManifest = await modelResponse.json() as {
+    FileReferences?: { Motions?: unknown, Expressions?: unknown }
+  }
+  assert.equal(skinManifest.FileReferences?.Motions, undefined)
+  assert.deepEqual(skinManifest.FileReferences?.Expressions, [
+    { Name: 'Smile', File: 'expressions/smile.exp3.json' },
+  ])
   assert.equal(modelResponse.headers.get('content-type'), 'application/json')
+
+  const nativeUrl = modelMessage.payload.model.nativeUrl
+  assert.ok(nativeUrl)
+  const nativeResponse = await fetch(nativeUrl, { headers: { Origin: 'null' } })
+  assert.equal(nativeResponse.status, 200)
+  assert.deepEqual(await nativeResponse.json(), JSON.parse(modelBytes.toString('utf8')))
 
   const mocResponse = await fetch(new URL('Hiyori.moc3', modelMessage.payload.model.url), {
     headers: { Origin: 'null' },
@@ -282,6 +333,12 @@ test('authorized clients receive a tokenized Live2D model3 package', async (t) =
   })
   assert.equal(motionResponse.status, 200)
   assert.deepEqual(Buffer.from(await motionResponse.arrayBuffer()), motionBytes)
+
+  const expressionResponse = await fetch(new URL('expressions/smile.exp3.json', modelMessage.payload.model.url), {
+    headers: { Origin: 'null' },
+  })
+  assert.equal(expressionResponse.status, 200)
+  assert.deepEqual(Buffer.from(await expressionResponse.arrayBuffer()), expressionBytes)
 
   assert.equal((await fetch(new URL('source.blend', modelMessage.payload.model.url), {
     headers: { Origin: 'null' },

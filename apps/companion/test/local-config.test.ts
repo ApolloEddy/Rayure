@@ -58,6 +58,26 @@ test('local config resolves a Live2D model3 entry without exposing extra fields'
   })
 })
 
+test('local config accepts explicit Live2D skin part exclusions', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'rayure-config-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const modelPath = join(root, 'Hiyori.model3.json')
+  const configPath = join(root, 'rayure.local.json')
+  await writeFile(modelPath, '{"Version":3}')
+  await writeFile(configPath, JSON.stringify({
+    model: {
+      id: 'hiyori-debug',
+      displayName: 'Hiyori debug',
+      format: 'live2d',
+      path: modelPath,
+      skinHiddenPartIds: ['Part45', 'Part46'],
+    },
+  }))
+
+  const config = await loadLocalConfig(configPath)
+  assert.deepEqual(config.model?.skinHiddenPartIds, ['Part45', 'Part46'])
+})
+
 test('local config rejects malformed JSON, unknown fields and unsafe model inputs', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'rayure-config-'))
   t.after(() => rm(root, { recursive: true, force: true }))

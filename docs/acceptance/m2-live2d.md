@@ -1,55 +1,46 @@
-# M2 Live2D 原生调试验收
+# M2 Live2D 皮套与原生内容验收
 
-状态：浏览器预检与 2026-08-24 连续播放回归通过；Wallpaper Engine CEF 已证实旧版本地 bundle、Companion 重连和 Live2D 资源链路；本轮生成动作的播放回执、插值、待机回落仍须经过 CEF 视觉与 DevTools 验收，离线 Core 与暂停恢复也仍未关闭
+状态：岛风 skin-only/原生内容切换已完成浏览器技术预检；模型专属参数映射和 ARDY 可见步态尚未验收；Wallpaper Engine CEF 的最终画面、DevTools、暂停/恢复和本轮生成动作仍是独立验收项。
 
 ## 范围
 
-本验收只覆盖 Hiyori 开发模型的原生 Cubism 调试表面、Companion 模型/动作目录和 Core 来源失败边界。Hiyori、动作、纹理、物理、Core 和本机配置均属于包外调试输入；它们不进入 Git、`public/`、`dist/` 或发布包。3D 只作为冻结回归基线，不在本切片扩展。
+本验收覆盖包外 Live2D 模型的清单校验、皮套入口、场景部件隐藏、模型自带内容显式导入、Companion 动作目录和 Core 来源失败边界。模型、动作、纹理、物理、Core 和本机配置均不进入 Git、`public/`、`dist/` 或发布包。
+
+## 当前参数映射状态（2026-08-25）
+
+- 当前岛风 model3 实测 545 个参数；腿脚和部分手臂使用 `Param7/8/9/10/11/12/14/15/16/17/19/79/80/86/286` 等非标准 ID。
+- 代码已加入显式 Shimakaze RigProfile，能够把 Canonical Motion 的相关控制计算成这些真实 ID 的写入值；标准 profile 仍保留给使用标准 Cubism 参数名的模型。
+- 这还不是通用导入器：尚未从 model3/cdi3 的 DisplayInfo 自动生成或校准 RigProfile，也没有在调试页完整报告每个 Canonical 控制的已映射/缺失状态。
+- `walk.forward` 的生成/发布/完成回执已能在普通浏览器链路中观察到，但本次记录不把它记为可见行走验收；需要下一次先完成映射诊断与逐模型校准，再在 Wallpaper Engine CEF 复核。
 
 ## 自动化门禁
 
-- `pnpm test`：协议 20 项、Companion 73 项、Wallpaper 57 项，共 150 项；
-- `pnpm typecheck`：所有工作区 TypeScript 检查通过；
-- `pnpm build`：生成独立 Wallpaper Web wallpaper；
-- `scripts/verify.ps1`：依赖审计、AIRI 边界、构建产物和 Git 私有资源边界检查；
-- `git ls-files -- 'scratch/**' 'apps/wallpaper/dist/**' '*.model3.json' '*.moc3' '*live2dcubismcore*.js'`：不应输出任何私有模型或 Cubism Core 文件。
+```powershell
+pnpm test
+pnpm typecheck
+pnpm build
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1 -SkipInstall
+```
+
+同时确认：
+
+```powershell
+git ls-files -- 'scratch/**' 'apps/wallpaper/dist/**' '*.model3.json' '*.moc3' '*live2dcubismcore*.js'
+```
+
+该命令不应输出任何私有模型或 Cubism Core 文件。
 
 ## 浏览器技术预检
 
-1. 使用被忽略的 `scratch/live2d-samples/Hiyori/rayure.local.live2d-debug.json` 启动 Companion，并启动 Vite。
-2. 打开 `http://127.0.0.1:4173/?live2dDebug=1`。预期 Companion 已连接、模型为 `Hiyori debug`、原生画布存在、参数数量为 70、默认动作是 `live2d-Idle-0`，调试栏有 10 个动作按钮。
-3. 点击 `TapBody 1`，预期活动动作变成 `live2d-TapBody-0`；点击停止，预期活动动作清空。浏览器错误/警告日志应为空。
-4. 指定 `live2dCoreUrl` 为不存在的回环 `.js`，预期模型状态为 `Live2D model unavailable`，诊断标题包含 `Cubism Core could not be loaded`，原生 canvas 数量为 0；不应出现“已就绪”状态或未处理异常。
-5. 若机器有已授权的包外 Core，可使用 Vite `/@fs/` 形式传入 `live2dCoreUrl` 重做第 2、3 步；没有 Core 时离线失败是预期结果。
+1. 使用被忽略的 `scratch/live2d-samples/Shimakaze/rayure.local.live2d-debug.json` 启动 Companion，并启动 Vite。
+2. 打开 `http://127.0.0.1:4173/`。浏览器开发预览会加载原生动作入口但隐藏模型自带场景部件；角色应保持比例、点击头部/身体应触发 `touch_head`/`touch_body` 等动作，不应出现被拉伸的全屏房间贴图。
+3. 追加 `?live2dDebug=1`，确认开发面板显示动作目录、原生内容开关、背景开关和表达式资源状态；当前 Shimakaze 无 `Expressions` 时表情按钮应禁用。追加 `?live2dNativeContent=0` 可验证 skin-only 入口和无动作状态。
+4. 通过 Wallpaper Engine 的 `importnativecontent` 属性切换为 `true`。预期原生入口重新加载，模型自带场景层恢复，动作目录可由运行时消费；关闭后应回到 skin-only 入口并停止原生动作。
+5. 显式打开 `?live2dDebug=1` 只能看到开发状态面板；它不会恢复桌面动作按钮，也不属于用户设置页。
+6. 将 `live2dCoreUrl` 指向不存在的回环 `.js` 时，预期状态为 `Live2D model unavailable`，原生 canvas 被清理，Companion/冻结的 3D 页面不因此中断。
 
-## 2026-08-24 浏览器连续播放复核
+## 资源与 CEF 边界
 
-- 在使用包外 Hiyori 配置、已连接 Companion 的浏览器会话中，原生 Cubism canvas、模型状态、70 个参数和 10 个动作按钮均已出现；模型、物理、姿态、用户数据、纹理以及已发布的 Canonical Motion URL 均成功返回。
-- 全新重载后浏览器控制台为 0 个错误；触发 `TapBody 1` 后停止也未产生新的错误。
-- 这证明常规浏览器中的资源、WebSocket、生成动作拉取与 Native Motion 切换链路可用；它不替代 Wallpaper Engine CEF 的视觉、DevTools 或暂停恢复验收。
-
-## Wallpaper Engine CEF 实机复核（2026-08-20）
-
-使用 Wallpaper Engine 2.8.42（64 位）导入同一 `apps/wallpaper/dist/project.json`，Companion 使用 Git 忽略的包外 Hiyori 配置，Core 继续使用默认的官方托管地址。
-
-已取得的运行证据：
-
-- Wallpaper Engine 启动 `webwallpaper64.exe` CEF 进程，页面历史记录确认加载的是 `file:///D:/CodingProjects/Mixed_Language/Rayure/apps/wallpaper/dist/index.html`；
-- CEF 与 `127.0.0.1:32145` 建立回环连接；Companion 停止后连接进入 `SynSent`，重新启动同一配置后恢复 `Established`；
-- CEF 缓存记录了新的会话令牌，并对 `Hiyori.model3.json`、`Hiyori.moc3`、物理、姿态、用户数据、10 个 `.motion3.json` 和两张纹理收到 `HTTP/1.1 200 OK`；
-- CEF 的 Code Cache 记录了固定官方 `https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js` 来源；本机没有包外离线 Core 文件，因此没有把在线 Core 误报为离线验收；
-- `bin/weblog.txt` 仍记录冻结 3D 场景的缺失 `/assets/scenes/japanese_room.png` 请求。它不改变本次 Live2D 令牌资源链路，但说明 3D 背景不能作为本轮视觉通过证据。
-
-以上证据证明 CEF 已执行本地 bundle 并重新建立 Live2D 资源会话；它们不等价于“原生画布已视觉确认”。
-
-## CEF 未关闭项
-
-普通 Chrome 的通过只能证明资源 URL、脚本加载和 DOM/Canvas 链路可用，不能替代 Wallpaper Engine CEF。以下项目必须在真实 Wallpaper Engine 导入同一 `dist/` 后复核：
-
-- CEF 能否执行本地 bundle 并创建原生 Cubism 画布；
-- Core、`.model3.json`、MOC3、纹理、物理和动作请求在 CEF 中是否都成功；
-- `motion.playback` 回执、Canonical Motion 帧间插值、根位移画布投影，以及生成动作结束/取消后恢复原生 Idle 是否在 CEF 中按预期执行；
-- 页面重载、Companion 重启、窗口暂停/恢复和动作替换后是否仍保持 generation 隔离与资源释放；
-- CEF DevTools 无未处理异常，实际画面无黑屏、纹理丢失或比例错误。
-
-当前已关闭“本地 bundle 执行、Companion 重连、模型与资源请求”证据；原生画布视觉、本轮生成动作播放、页面重载/暂停恢复、动作替换和 CEF DevTools 仍需在可观察的 CEF 调试窗口中逐项确认。在这些项目完成前，M2 不能作为正式发布完成条件。
+- Core 只能使用受控的官方、同源或回环来源；离线 Core 必须是包外且已授权的本地文件。
+- Chrome/普通浏览器通过只证明资源 URL、脚本加载和 DOM/Canvas 链路可用；必须把同一 `apps/wallpaper/dist/` 导入 Wallpaper Engine，在真实画面和 DevTools 中复核模型、场景切换、页面重载、暂停/恢复、动作替换和异常释放。
+- 旧的 Hiyori 调试模型、旧动作按钮和旧样例包不再是当前验收输入；当前本机模型统一使用岛风目录，正式发布仍不携带任何角色资源。

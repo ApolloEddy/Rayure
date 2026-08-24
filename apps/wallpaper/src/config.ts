@@ -10,6 +10,8 @@ export interface WallpaperSettings {
   accent: AccentColor
   modelScale: number
   showStatus: boolean
+  showBranding: boolean
+  importNativeContent: boolean
 }
 
 export const DEFAULT_WALLPAPER_SETTINGS: Readonly<WallpaperSettings> = {
@@ -17,7 +19,9 @@ export const DEFAULT_WALLPAPER_SETTINGS: Readonly<WallpaperSettings> = {
   fps: 30,
   accent: { r: 103, g: 232, b: 249 },
   modelScale: 1,
-  showStatus: true,
+  showStatus: false,
+  showBranding: false,
+  importNativeContent: false,
 }
 
 export function parsePort(value: unknown): number | undefined {

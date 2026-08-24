@@ -19,6 +19,7 @@ export const companionCapabilities = [
   'lifecycle.status',
   'model.catalog',
   'motion.catalog',
+  'motion.generate',
   'motion.playback',
   'speech.output',
   'expression.control',
@@ -57,6 +58,33 @@ export interface ClientMotionPlaybackMessage {
     motionId: string
     phase: MotionPlaybackPhase
     frameIndex: number
+  }
+}
+
+/** Renderer-side developer request for one ARDY Canonical Motion segment. */
+export interface ClientMotionGenerateMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'motion.generate'
+  id: string
+  payload: {
+    prompt: string
+    numFrames?: number
+    numDenoisingSteps?: number
+    cfgWeight?: number
+  }
+}
+
+export const motionGenerationStatusPhases = ['accepted', 'failed'] as const
+export type MotionGenerationStatusPhase = typeof motionGenerationStatusPhases[number]
+
+export interface ServerMotionGenerateStatusMessage {
+  protocolVersion: typeof PROTOCOL_VERSION
+  type: 'motion.generate.status'
+  id: string
+  replyTo: string
+  payload: {
+    phase: MotionGenerationStatusPhase
+    message?: string
   }
 }
 
@@ -105,6 +133,10 @@ export interface ModelDescriptor {
   displayName: string
   format: 'pmx' | 'live2d'
   url: string
+  /** Optional full Live2D entry used only when model-native content is explicitly imported. */
+  nativeUrl?: string
+  /** Source-scene parts hidden in the default skin-only view. */
+  skinHiddenPartIds?: readonly string[]
 }
 
 export interface ServerModelAvailableMessage {
@@ -222,12 +254,13 @@ export interface ServerEmotePlayMessage {
   }
 }
 
-export type ClientMessage = ClientHelloMessage | ClientMotionPlaybackMessage | ClientSpeechPlaybackMessage
+export type ClientMessage = ClientHelloMessage | ClientMotionGenerateMessage | ClientMotionPlaybackMessage | ClientSpeechPlaybackMessage
 export type ServerMessage =
   | ServerWelcomeMessage
   | ServerErrorMessage
   | ServerModelAvailableMessage
   | ServerMotionCatalogMessage
+  | ServerMotionGenerateStatusMessage
   | ServerMotionPublishedMessage
   | ServerSpeechPublishedMessage
   | ServerMotionPlayMessage
@@ -270,6 +303,29 @@ export function createClientMotionPlayback(input: {
       phase: requireMotionPlaybackPhase(input.phase),
       frameIndex: requireInteger(input.frameIndex, 'frameIndex', 0, 600),
     },
+  }
+}
+
+export function createClientMotionGenerate(input: {
+  id: string
+  prompt: string
+  numFrames?: number
+  numDenoisingSteps?: number
+  cfgWeight?: number
+}): ClientMotionGenerateMessage {
+  const payload: ClientMotionGenerateMessage['payload'] = {
+    prompt: requireDisplayString(input.prompt, 'motion generate prompt', 512),
+  }
+  if (input.numFrames !== undefined) payload.numFrames = requireInteger(input.numFrames, 'motion generate numFrames', 1, 600)
+  if (input.numDenoisingSteps !== undefined) {
+    payload.numDenoisingSteps = requireInteger(input.numDenoisingSteps, 'motion generate numDenoisingSteps', 1, 20)
+  }
+  if (input.cfgWeight !== undefined) payload.cfgWeight = requireFiniteNumber(input.cfgWeight, 'motion generate cfgWeight', 0, 20)
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'motion.generate',
+    id: requireIdentifier(input.id, 'id'),
+    payload,
   }
 }
 
@@ -444,6 +500,25 @@ export function createServerMotionPublished(input: {
   }
 }
 
+export function createServerMotionGenerateStatus(input: {
+  id: string
+  replyTo: string
+  phase: MotionGenerationStatusPhase
+  message?: string
+}): ServerMotionGenerateStatusMessage {
+  const payload: ServerMotionGenerateStatusMessage['payload'] = {
+    phase: requireMotionGenerationStatusPhase(input.phase),
+  }
+  if (input.message !== undefined) payload.message = requireDisplayString(input.message, 'motion generate status message', 160)
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    type: 'motion.generate.status',
+    id: requireIdentifier(input.id, 'id'),
+    replyTo: requireIdentifier(input.replyTo, 'replyTo'),
+    payload,
+  }
+}
+
 export function createServerSpeechPublished(input: {
   id: string
   speech: SpeechDescriptor
@@ -512,6 +587,23 @@ export function parseClientMessage(raw: string): ClientMessage {
       motionId: requireIdentifier(payload.motionId, 'motionId'),
       phase: requireMotionPlaybackPhase(payload.phase),
       frameIndex: requireInteger(payload.frameIndex, 'frameIndex', 0, 600),
+    })
+  }
+
+  if (value.type === 'motion.generate') {
+    requireExactKeys(value, ['protocolVersion', 'type', 'id', 'payload'], 'motion generate')
+    const payload = requireRecord(value.payload, 'motion generate payload')
+    const expectedKeys = ['prompt']
+    if (payload.numFrames !== undefined) expectedKeys.push('numFrames')
+    if (payload.numDenoisingSteps !== undefined) expectedKeys.push('numDenoisingSteps')
+    if (payload.cfgWeight !== undefined) expectedKeys.push('cfgWeight')
+    requireExactKeys(payload, expectedKeys, 'motion generate payload')
+    return createClientMotionGenerate({
+      id: requireIdentifier(value.id, 'id'),
+      prompt: requireDisplayString(payload.prompt, 'motion generate prompt', 512),
+      ...(payload.numFrames === undefined ? {} : { numFrames: requireInteger(payload.numFrames, 'motion generate numFrames', 1, 600) }),
+      ...(payload.numDenoisingSteps === undefined ? {} : { numDenoisingSteps: requireInteger(payload.numDenoisingSteps, 'motion generate numDenoisingSteps', 1, 20) }),
+      ...(payload.cfgWeight === undefined ? {} : { cfgWeight: requireFiniteNumber(payload.cfgWeight, 'motion generate cfgWeight', 0, 20) }),
     })
   }
 
@@ -662,6 +754,20 @@ export function parseServerMessage(raw: string): ServerMessage {
     })
   }
 
+  if (value.type === 'motion.generate.status') {
+    requireExactKeys(value, ['protocolVersion', 'type', 'id', 'replyTo', 'payload'], 'motion generate status')
+    const payload = requireRecord(value.payload, 'motion generate status payload')
+    const expectedKeys = ['phase']
+    if (payload.message !== undefined) expectedKeys.push('message')
+    requireExactKeys(payload, expectedKeys, 'motion generate status payload')
+    return createServerMotionGenerateStatus({
+      id: requireIdentifier(value.id, 'id'),
+      replyTo: requireIdentifier(value.replyTo, 'replyTo'),
+      phase: requireMotionGenerationStatusPhase(payload.phase),
+      ...(payload.message === undefined ? {} : { message: requireDisplayString(payload.message, 'motion generate status message', 160) }),
+    })
+  }
+
   if (value.type === 'speech.published') {
     requireExactKeys(value, ['protocolVersion', 'type', 'id', 'payload'], 'speech published')
     const payload = requireRecord(value.payload, 'speech published payload')
@@ -789,6 +895,13 @@ function requireMotionPlaybackPhase(value: unknown): MotionPlaybackPhase {
   return value as MotionPlaybackPhase
 }
 
+function requireMotionGenerationStatusPhase(value: unknown): MotionGenerationStatusPhase {
+  if (typeof value !== 'string' || !motionGenerationStatusPhases.includes(value as MotionGenerationStatusPhase)) {
+    throw new ProtocolValidationError('motion generation status phase is invalid')
+  }
+  return value as MotionGenerationStatusPhase
+}
+
 function requireSpeechPlaybackPhase(value: unknown): SpeechPlaybackPhase {
   if (typeof value !== 'string' || !speechPlaybackPhases.includes(value as SpeechPlaybackPhase)) {
     throw new ProtocolValidationError('speech playback phase is invalid')
@@ -810,16 +923,58 @@ function requireErrorCode(value: unknown): ServerErrorCode {
 
 function requireModelDescriptor(value: unknown): ModelDescriptor {
   const model = requireRecord(value, 'model descriptor')
-  requireExactKeys(model, ['id', 'displayName', 'format', 'url'], 'model descriptor')
+  const hasNativeUrl = model.nativeUrl !== undefined
+  const hasSkinHiddenPartIds = model.skinHiddenPartIds !== undefined
+  const expectedKeys = ['id', 'displayName', 'format', 'url']
+  if (hasNativeUrl) expectedKeys.push('nativeUrl')
+  if (hasSkinHiddenPartIds) expectedKeys.push('skinHiddenPartIds')
+  requireExactKeys(
+    model,
+    expectedKeys,
+    'model descriptor',
+  )
   if (model.format !== 'pmx' && model.format !== 'live2d') {
     throw new ProtocolValidationError('model format must be pmx or live2d')
   }
+  if (model.nativeUrl !== undefined && model.format !== 'live2d') {
+    throw new ProtocolValidationError('nativeUrl is only supported for Live2D models')
+  }
+  if (model.skinHiddenPartIds !== undefined && model.format !== 'live2d') {
+    throw new ProtocolValidationError('skinHiddenPartIds are only supported for Live2D models')
+  }
+  const skinHiddenPartIds = model.skinHiddenPartIds === undefined
+    ? undefined
+    : requireSkinHiddenPartIds(model.skinHiddenPartIds)
   return {
     id: requireIdentifier(model.id, 'model id'),
     displayName: requireDisplayString(model.displayName, 'model displayName', 96),
     format: model.format,
     url: requireLoopbackAssetUrl(model.url),
+    ...(model.nativeUrl === undefined ? {} : { nativeUrl: requireLoopbackAssetUrl(model.nativeUrl) }),
+    ...(skinHiddenPartIds === undefined ? {} : { skinHiddenPartIds }),
   }
+}
+
+function requireSkinHiddenPartIds(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.length > 512) {
+    throw new ProtocolValidationError('model skinHiddenPartIds must contain at most 512 entries')
+  }
+  const ids = value.map((entry, index) => {
+    if (
+      typeof entry !== 'string'
+      || entry.length < 1
+      || entry.length > 128
+      || entry.trim() !== entry
+      || /[\u0000-\u001F\u007F]/u.test(entry)
+    ) {
+      throw new ProtocolValidationError(`model skinHiddenPartIds[${index}] must be a trimmed printable identifier`)
+    }
+    return entry
+  })
+  if (new Set(ids).size !== ids.length) {
+    throw new ProtocolValidationError('model skinHiddenPartIds must not contain duplicates')
+  }
+  return ids
 }
 
 function requireLoopbackAssetUrl(value: unknown): string {
@@ -942,4 +1097,11 @@ function requireInteger(value: unknown, name: string, minimum: number, maximum: 
     throw new ProtocolValidationError(`${name} must be an integer from ${minimum} through ${maximum}`)
   }
   return value as number
+}
+
+function requireFiniteNumber(value: unknown, name: string, minimum: number, maximum: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum || value > maximum) {
+    throw new ProtocolValidationError(`${name} must be a finite number from ${minimum} through ${maximum}`)
+  }
+  return value
 }

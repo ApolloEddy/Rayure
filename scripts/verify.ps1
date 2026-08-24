@@ -64,7 +64,7 @@ try {
     if ($project.type -ne 'web' -or $project.file -ne 'index.html') {
         throw 'Wallpaper project.json must declare type=web and file=index.html'
     }
-    $expectedProperties = @('accentcolor', 'companionport', 'modelscale', 'showstatus')
+    $expectedProperties = @('accentcolor', 'companionport', 'modelscale', 'showstatus', 'showbranding', 'importnativecontent')
     $actualProperties = @($project.general.properties.PSObject.Properties.Name)
     if (($actualProperties -join ',') -ne ($expectedProperties -join ',')) {
         throw "Wallpaper project properties changed unexpectedly: $($actualProperties -join ', ')"

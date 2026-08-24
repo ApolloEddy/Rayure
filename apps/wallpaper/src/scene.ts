@@ -168,6 +168,10 @@ export class RayureScene {
     this.#particles.visible = visible
   }
 
+  setEnvironmentVisible(visible: boolean): void {
+    this.#environment.setVisible(visible)
+  }
+
   async loadModel(descriptor: ModelDescriptor): Promise<MmdModelLoadOutcome> {
     const host = await this.#ensureMmdModelHost()
     return host?.load(descriptor) ?? 'failed'

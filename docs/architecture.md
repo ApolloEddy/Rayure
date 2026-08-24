@@ -63,7 +63,7 @@ flowchart LR
 - Renderer 与 Companion 的能力协商；
 - 后续所有特权消息的认证与显式能力声明。
 
-M1 允许 `client.hello → server.welcome/server.error → model.available`。`model.available` 只包含模型标识、显示名、格式和一次性回环 URL；磁盘路径始终留在 Companion。当前模型通道通过高熵会话令牌、Origin、GET/HEAD、扩展名白名单、大小限制和 realpath 边界收敛为只读能力。摄像头、麦克风、执行和供应商凭据等更高权限消息进入协议前，仍必须完成持久配对设计和威胁测试。
+M1 允许 `client.hello → server.welcome/server.error → model.available`。`model.available` 只包含模型标识、显示名、格式和一次性回环 URL；Live2D 还可带一个只在显式导入时使用的原生入口 URL，以及默认皮套模式隐藏的 part ID 列表；磁盘路径始终留在 Companion。Live2D 默认入口会省略模型原生 `Motions`，模型自带动作和场景层不会在默认加载阶段进入 Renderer。当前模型通道通过高熵会话令牌、Origin、GET/HEAD、扩展名白名单、大小限制和 realpath 边界收敛为只读能力。摄像头、麦克风、执行和供应商凭据等更高权限消息进入协议前，仍必须完成持久配对设计和威胁测试。
 
 ## 3. Wallpaper Engine 宿主约束
 
@@ -72,7 +72,7 @@ M1 允许 `client.hello → server.welcome/server.error → model.available`。`
 - 渲染循环遵守用户设置的 FPS，而不是锁死刷新率：[FPS Limiter](https://docs.wallpaperengine.io/en/web/performance/fps.html)。
 - CEF 与普通 Chrome 并非完全等价；浏览器测试只算技术预检，最终必须通过 Wallpaper Engine 的 CEF 调试入口复核：[Web Wallpaper Debugging](https://docs.wallpaperengine.io/en/web/debug/debug.html)。
 - Wallpaper Engine 导入时会复制所选目录的全部内容，故 `dist/` 必须是独立、最小、无私有资产的发布目录。
-- Cubism Core 只在 Live2D 调试表面创建前按受控来源加载：默认是固定官方地址，离线调试只能显式提供同源/回环 `.js` 文件；Core 不复制进 `public/`、`dist/` 或发布包。
+- Cubism Core 只在 Live2D 原生表面创建前按受控来源加载：默认是固定官方地址，离线调试只能显式提供同源/回环 `.js` 文件；Core 不复制进 `public/`、`dist/` 或发布包。
 
 ## 4. 数据流
 

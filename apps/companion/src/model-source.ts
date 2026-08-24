@@ -3,6 +3,8 @@ export interface CompanionModelSource {
   displayName: string
   format: 'pmx' | 'live2d'
   entryFilePath: string
+  /** Live2D parts that belong to the source scene/effects, not the character skin. */
+  skinHiddenPartIds?: readonly string[]
 }
 
 export interface CompanionMotionSource {

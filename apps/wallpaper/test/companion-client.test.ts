@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   createServerSpeechPublished,
+  createServerMotionGenerateStatus,
   createServerWelcome,
   parseClientMessage,
   serializeWireMessage,
@@ -65,5 +66,34 @@ test('CompanionClient receives speech.published and reports playback telemetry',
   const telemetry = parseClientMessage(socket.sent.at(-1) ?? '')
   assert.equal(telemetry.type, 'speech.playback')
   if (telemetry.type === 'speech.playback') assert.equal(telemetry.payload.timeMs, 120)
+  client.stop()
+})
+
+test('CompanionClient sends a debug ARDY generation request and receives status', () => {
+  const socket = new FakeSocket()
+  const statuses: string[] = []
+  const client = new CompanionClient({
+    port: 32145,
+    build: 'test',
+    webSocketFactory: () => socket as unknown as WebSocket,
+    createId: (() => {
+      let count = 0
+      return () => `id-${++count}`
+    })(),
+    onMotionGenerateStatus: status => statuses.push(`${status.requestId}:${status.phase}`),
+  })
+  client.start()
+  socket.readyState = FakeSocket.OPEN
+  socket.emit('open')
+  const hello = parseClientMessage(socket.sent[0] ?? '')
+  socket.emit('message', { data: serializeWireMessage(createServerWelcome({ id: 'welcome', replyTo: hello.id, connectionId: 'conn', serverTimeMs: Date.now() })) })
+
+  const requestId = client.requestMotionGeneration({ prompt: 'A person waves their hand casually' })
+  assert.equal(requestId, 'id-2')
+  const request = parseClientMessage(socket.sent.at(-1) ?? '')
+  assert.equal(request.type, 'motion.generate')
+  socket.emit('message', { data: serializeWireMessage(createServerMotionGenerateStatus({ id: 'accepted', replyTo: requestId, phase: 'accepted' })) })
+  socket.emit('message', { data: serializeWireMessage(createServerMotionGenerateStatus({ id: 'failed', replyTo: requestId, phase: 'failed', message: 'failed' })) })
+  assert.deepEqual(statuses, ['id-2:accepted', 'id-2:failed'])
   client.stop()
 })

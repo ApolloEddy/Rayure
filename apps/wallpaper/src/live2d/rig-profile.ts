@@ -15,6 +15,19 @@ export type Live2dControl =
   | 'rightArmAngle'
   | 'leftElbowAngle'
   | 'rightElbowAngle'
+  | 'leftThighAngle'
+  | 'rightThighAngle'
+  | 'leftKneeBend'
+  | 'rightKneeBend'
+  | 'leftFootAngle'
+  | 'rightFootAngle'
+  | 'leftThighDepth'
+  | 'rightThighDepth'
+  | 'leftKneeDepth'
+  | 'rightKneeDepth'
+  | 'leftFootDepth'
+  | 'rightFootDepth'
+  | 'squat'
   | 'legPhase'
 
 export interface Live2dJointBindings {
@@ -90,11 +103,60 @@ export const STANDARD_LIVE2D_RIG_PROFILE: Readonly<Live2dRigProfile> = {
     { parameterId: 'ParamArmRA', control: 'rightArmAngle', min: -90, max: 90, neutral: 0 },
     { parameterId: 'ParamArmLB', control: 'leftElbowAngle', min: 0, max: 180, neutral: 90, mode: 'absolute' },
     { parameterId: 'ParamArmRB', control: 'rightElbowAngle', min: 0, max: 180, neutral: 90, mode: 'absolute' },
-    // Hiyori exposes one signed leg-cycle parameter. It cannot convey full
+    // Some models expose one signed leg-cycle parameter. It cannot convey full
     // 3D locomotion, but it makes alternating ARDY gait visible instead of
     // dropping all lower-body information at the adapter boundary.
     { parameterId: 'ParamLeg', control: 'legPhase', min: -1, max: 1, neutral: 0 },
   ],
+}
+
+/**
+ * Calibrated bindings for the external Shimakaze/Daofeng model used by the
+ * local Rayure preview.  This model does not expose the generic ParamArmLA /
+ * ParamLeg ids, so silently applying the standard profile would make ARDY
+ * playback appear to complete while only head/body channels moved.
+ */
+export const SHIMAKAZE_LIVE2D_RIG_PROFILE: Readonly<Live2dRigProfile> = {
+  id: 'rayure-live2d-shimakaze-v1',
+  joints: STANDARD_LIVE2D_RIG_PROFILE.joints,
+  parameters: [
+    { parameterId: 'ParamAngleX', control: 'headYaw', min: -30, max: 30, neutral: 0 },
+    { parameterId: 'ParamAngleY', control: 'headPitch', min: -30, max: 30, neutral: 0 },
+    { parameterId: 'ParamAngleZ', control: 'headRoll', min: -30, max: 30, neutral: 0 },
+    { parameterId: 'ParamBodyAngleX', control: 'bodyYaw', min: -10, max: 10, neutral: 0 },
+    { parameterId: 'ParamBodyAngleY', control: 'bodyPitch', min: -10, max: 10, neutral: 0 },
+    { parameterId: 'ParamBodyAngleZ', control: 'bodyRoll', min: -10, max: 10, neutral: 0 },
+    // Shimakaze's arm controls are split into upper/lower arm ids.
+    { parameterId: 'Param79', control: 'leftArmAngle', min: -90, max: 90, neutral: 0 },
+    { parameterId: 'Param2', control: 'rightArmAngle', min: -90, max: 90, neutral: 0 },
+    { parameterId: 'Param80', control: 'leftElbowAngle', min: -20, max: 20, neutral: 0, scale: 0.8 },
+    { parameterId: 'Param4', control: 'rightElbowAngle', min: -20, max: 20, neutral: 0, scale: 0.8 },
+    // The lower body is a six-channel 2D rig.  Use both the projected joint
+    // angle and depth angle so a walk is visible even though Live2D has no
+    // 3D root/foot bones.
+    { parameterId: 'Param7', control: 'leftThighAngle', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param8', control: 'leftKneeBend', min: -12, max: 12, neutral: 0, scale: 0.65 },
+    { parameterId: 'Param9', control: 'leftFootAngle', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param10', control: 'leftThighDepth', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param11', control: 'leftKneeDepth', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param12', control: 'leftFootDepth', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param14', control: 'rightThighAngle', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param15', control: 'rightKneeBend', min: -12, max: 12, neutral: 0, scale: 0.65 },
+    { parameterId: 'Param16', control: 'rightFootAngle', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param17', control: 'rightThighDepth', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param86', control: 'rightKneeDepth', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param19', control: 'rightFootDepth', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param286', control: 'squat', min: -10, max: 10, neutral: 0, scale: 0.45 },
+  ],
+}
+
+/** Select a model-specific profile only when its defining parameter ids exist. */
+export function resolveLive2dRigProfile(parameterIds: readonly string[]): Live2dRigProfile {
+  const available = new Set(parameterIds)
+  if (available.has('Param286') && available.has('Param7') && available.has('Param14')) {
+    return SHIMAKAZE_LIVE2D_RIG_PROFILE
+  }
+  return STANDARD_LIVE2D_RIG_PROFILE
 }
 
 export class Live2dParameterAdapter {
@@ -199,6 +261,19 @@ function readControl(
     case 'rightArmAngle': return readPlanarAngle(frame, joints.rightShoulder, joints.rightElbow)
     case 'leftElbowAngle': return readElbowAngle(frame, joints.leftShoulder, joints.leftElbow, joints.leftWrist)
     case 'rightElbowAngle': return readElbowAngle(frame, joints.rightShoulder, joints.rightElbow, joints.rightWrist)
+    case 'leftThighAngle': return readLegAngle(frame, joints.leftHip, joints.leftKnee)
+    case 'rightThighAngle': return readLegAngle(frame, joints.rightHip, joints.rightKnee)
+    case 'leftKneeBend': return readKneeBend(frame, joints.leftHip, joints.leftKnee, joints.leftAnkle)
+    case 'rightKneeBend': return readKneeBend(frame, joints.rightHip, joints.rightKnee, joints.rightAnkle)
+    case 'leftFootAngle': return readLegAngle(frame, joints.leftKnee, joints.leftAnkle)
+    case 'rightFootAngle': return readLegAngle(frame, joints.rightKnee, joints.rightAnkle)
+    case 'leftThighDepth': return readDepthAngle(frame, joints.leftHip, joints.leftKnee)
+    case 'rightThighDepth': return readDepthAngle(frame, joints.rightHip, joints.rightKnee)
+    case 'leftKneeDepth': return readDepthAngle(frame, joints.leftKnee, joints.leftAnkle)
+    case 'rightKneeDepth': return readDepthAngle(frame, joints.rightKnee, joints.rightAnkle)
+    case 'leftFootDepth': return readDepthAngle(frame, joints.leftAnkle, 'left_toe')
+    case 'rightFootDepth': return readDepthAngle(frame, joints.rightAnkle, 'right_toe')
+    case 'squat': return readSquat(frame, joints)
     case 'legPhase': return readLegPhase(frame, joints)
   }
 }
@@ -236,6 +311,42 @@ function readElbowAngle(
   if (denominator <= 1e-6) return undefined
   const cosine = clamp(dot(first, second) / denominator, -1, 1)
   return Math.acos(cosine) * 180 / Math.PI
+}
+
+/** Angle away from the model's neutral, downward leg direction. */
+function readLegAngle(frame: CanonicalMotionFrame, fromName: string | undefined, toName: string | undefined): number | undefined {
+  if (fromName === undefined || toName === undefined) return undefined
+  const from = frame.joints[fromName]?.position
+  const to = frame.joints[toName]?.position
+  if (!from || !to) return undefined
+  return Math.atan2(to[0] - from[0], from[1] - to[1]) * 180 / Math.PI
+}
+
+/** Forward/backward angle in the canonical XZ plane. */
+function readDepthAngle(frame: CanonicalMotionFrame, fromName: string | undefined, toName: string | undefined): number | undefined {
+  if (fromName === undefined || toName === undefined) return undefined
+  const from = frame.joints[fromName]?.position
+  const to = frame.joints[toName]?.position
+  if (!from || !to) return undefined
+  return Math.atan2(to[2] - from[2], from[1] - to[1]) * 180 / Math.PI
+}
+
+function readKneeBend(
+  frame: CanonicalMotionFrame,
+  hipName: string | undefined,
+  kneeName: string | undefined,
+  ankleName: string | undefined,
+): number | undefined {
+  if (hipName === undefined || kneeName === undefined || ankleName === undefined) return undefined
+  const angle = readElbowAngle(frame, hipName, kneeName, ankleName)
+  return angle === undefined ? undefined : 180 - angle
+}
+
+function readSquat(frame: CanonicalMotionFrame, joints: Live2dJointBindings): number | undefined {
+  const left = readKneeBend(frame, joints.leftHip, joints.leftKnee, joints.leftAnkle)
+  const right = readKneeBend(frame, joints.rightHip, joints.rightKnee, joints.rightAnkle)
+  if (left === undefined || right === undefined) return undefined
+  return Math.max(0, (left + right) / 2 - 15)
 }
 
 function readLegPhase(frame: CanonicalMotionFrame, joints: Live2dJointBindings): number | undefined {

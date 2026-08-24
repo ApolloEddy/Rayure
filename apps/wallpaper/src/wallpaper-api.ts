@@ -7,6 +7,8 @@ export interface WallpaperUserProperties {
   accentcolor?: WallpaperUserProperty
   modelscale?: WallpaperUserProperty
   showstatus?: WallpaperUserProperty
+  showbranding?: WallpaperUserProperty
+  importnativecontent?: WallpaperUserProperty
 }
 
 export interface WallpaperGeneralProperties {

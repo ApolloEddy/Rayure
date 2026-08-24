@@ -6,10 +6,12 @@ import {
   PROTOCOL_VERSION,
   ProtocolValidationError,
   createClientHello,
+  createClientMotionGenerate,
   createClientMotionPlayback,
   createClientSpeechPlayback,
   createServerModelAvailable,
   createServerMotionPublished,
+  createServerMotionGenerateStatus,
   createServerSpeechPublished,
   createServerWelcome,
   parseClientMessage,
@@ -36,6 +38,41 @@ test('renderer playback telemetry round-trips and accepts only bounded frame pro
     { protocolVersion: 1, type: 'motion.playback', id: 'x', payload: { motionId: 'motion', phase: 'progress', frameIndex: -1 } },
     { protocolVersion: 1, type: 'motion.playback', id: 'x', payload: { motionId: 'motion', phase: 'progress', frameIndex: 601 } },
     { protocolVersion: 1, type: 'motion.playback', id: 'x', payload: { motionId: 'motion', phase: 'progress', frameIndex: 1, extra: true } },
+  ]) {
+    assert.throws(() => parseClientMessage(JSON.stringify(payload)), ProtocolValidationError)
+  }
+})
+
+test('debug motion generation requests and statuses stay bounded and correlated', () => {
+  const request = createClientMotionGenerate({
+    id: 'debug-generate-1',
+    prompt: 'A person waves their hand casually',
+    numFrames: 60,
+    numDenoisingSteps: 4,
+    cfgWeight: 2,
+  })
+  assert.deepEqual(parseClientMessage(JSON.stringify(request)), request)
+
+  const accepted = createServerMotionGenerateStatus({
+    id: 'status-1',
+    replyTo: request.id,
+    phase: 'accepted',
+  })
+  assert.deepEqual(parseServerMessage(JSON.stringify(accepted)), accepted)
+
+  const failed = createServerMotionGenerateStatus({
+    id: 'status-2',
+    replyTo: request.id,
+    phase: 'failed',
+    message: 'ARDY process failed',
+  })
+  assert.deepEqual(parseServerMessage(JSON.stringify(failed)), failed)
+
+  for (const payload of [
+    { protocolVersion: 1, type: 'motion.generate', id: 'x', payload: { prompt: '' } },
+    { protocolVersion: 1, type: 'motion.generate', id: 'x', payload: { prompt: 'wave', numFrames: 0 } },
+    { protocolVersion: 1, type: 'motion.generate', id: 'x', payload: { prompt: 'wave', cfgWeight: Number.NaN } },
+    { protocolVersion: 1, type: 'motion.generate', id: 'x', payload: { prompt: 'wave', extra: true } },
   ]) {
     assert.throws(() => parseClientMessage(JSON.stringify(payload)), ProtocolValidationError)
   }
@@ -109,12 +146,29 @@ test('model availability supports a tokenized Live2D model3 entry', () => {
       displayName: 'Hiyori debug',
       format: 'live2d',
       url: 'http://127.0.0.1:32145/assets/0123456789abcdef/Hiyori.model3.json',
+      nativeUrl: 'http://127.0.0.1:32145/assets/0123456789abcdef/Hiyori.native.model3.json',
+      skinHiddenPartIds: ['Part45', 'Part46'],
     },
   })
   const parsed = parseServerMessage(JSON.stringify(available))
   assert.deepEqual(parsed, available)
   if (parsed.type !== 'model.available') assert.fail('expected model.available')
   assert.equal(parsed.payload.model.format, 'live2d')
+  assert.equal(parsed.payload.model.nativeUrl, 'http://127.0.0.1:32145/assets/0123456789abcdef/Hiyori.native.model3.json')
+  assert.deepEqual(parsed.payload.model.skinHiddenPartIds, ['Part45', 'Part46'])
+})
+
+test('model availability rejects native entry URLs for PMX models', () => {
+  assert.throws(() => createServerModelAvailable({
+    id: 'model-message-native-pmx',
+    model: {
+      id: 'local-test-model',
+      displayName: 'Local test model',
+      format: 'pmx',
+      url: 'http://127.0.0.1:32145/assets/0123456789abcdef/model.pmx',
+      nativeUrl: 'http://127.0.0.1:32145/assets/0123456789abcdef/model.native.pmx',
+    },
+  }), ProtocolValidationError)
 })
 
 test('model availability rejects unsupported model formats', () => {

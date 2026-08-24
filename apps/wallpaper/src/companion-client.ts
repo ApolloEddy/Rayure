@@ -1,5 +1,6 @@
 import {
   createClientHello,
+  createClientMotionGenerate,
   createClientMotionPlayback,
   createClientSpeechPlayback,
   parseServerMessage,
@@ -8,6 +9,7 @@ import {
 import type {
   ModelDescriptor,
   MotionPlaybackPhase,
+  ServerMotionGenerateStatusMessage,
   MotionDescriptor,
   SpeechDescriptor,
   SpeechPlaybackPhase,
@@ -49,6 +51,7 @@ export interface CompanionClientOptions {
   onModelAvailable?: (model: ModelDescriptor) => void
   onMotionCatalog?: (motions: readonly MotionDescriptor[]) => void
   onMotionPublished?: (motion: MotionDescriptor) => void
+  onMotionGenerateStatus?: (status: ServerMotionGenerateStatusMessage['payload'] & { requestId: string }) => void
   onSpeechPublished?: (speech: SpeechDescriptor) => void
   onMotionPlay?: (motion: MotionDescriptor) => void
   onMotionStop?: (motionId?: string) => void
@@ -69,6 +72,7 @@ export class CompanionClient {
   readonly #onModelAvailable: ((model: ModelDescriptor) => void) | undefined
   readonly #onMotionCatalog: ((motions: readonly MotionDescriptor[]) => void) | undefined
   readonly #onMotionPublished: ((motion: MotionDescriptor) => void) | undefined
+  readonly #onMotionGenerateStatus: CompanionClientOptions['onMotionGenerateStatus']
   readonly #onSpeechPublished: ((speech: SpeechDescriptor) => void) | undefined
   readonly #onMotionPlay: ((motion: MotionDescriptor) => void) | undefined
   readonly #onMotionStop: ((motionId?: string) => void) | undefined
@@ -93,6 +97,7 @@ export class CompanionClient {
     this.#onModelAvailable = options.onModelAvailable
     this.#onMotionCatalog = options.onMotionCatalog
     this.#onMotionPublished = options.onMotionPublished
+    this.#onMotionGenerateStatus = options.onMotionGenerateStatus
     this.#onSpeechPublished = options.onSpeechPublished
     this.#onMotionPlay = options.onMotionPlay
     this.#onMotionStop = options.onMotionStop
@@ -186,6 +191,32 @@ export class CompanionClient {
     }
   }
 
+  /** Requests one ARDY segment from the local Companion debug/runtime path. */
+  requestMotionGeneration(input: {
+    id?: string
+    prompt: string
+    numFrames?: number
+    numDenoisingSteps?: number
+    cfgWeight?: number
+  }): string | false {
+    const socket = this.#socket
+    if (!this.#started || this.#phase !== 'connected' || socket === undefined || socket.readyState !== WebSocket.OPEN) return false
+    const id = input.id ?? this.#createId()
+    try {
+      socket.send(serializeWireMessage(createClientMotionGenerate({
+        id,
+        prompt: input.prompt,
+        ...(input.numFrames === undefined ? {} : { numFrames: input.numFrames }),
+        ...(input.numDenoisingSteps === undefined ? {} : { numDenoisingSteps: input.numDenoisingSteps }),
+        ...(input.cfgWeight === undefined ? {} : { cfgWeight: input.cfgWeight }),
+      })))
+      return id
+    }
+    catch {
+      return false
+    }
+  }
+
   #replaceConnection(): void {
     this.#generation += 1
     this.#clearReconnectTimer()
@@ -270,6 +301,17 @@ export class CompanionClient {
           if (!welcomed) throw new Error('Companion published motion before completing the handshake')
           try {
             this.#onMotionPublished?.(message.payload.motion)
+          }
+          catch {
+            // Transport lifecycle isolation.
+          }
+          return
+        }
+
+        if (message.type === 'motion.generate.status') {
+          if (!welcomed) throw new Error('Companion announced motion generation status before completing the handshake')
+          try {
+            this.#onMotionGenerateStatus?.({ ...message.payload, requestId: message.replyTo })
           }
           catch {
             // Transport lifecycle isolation.

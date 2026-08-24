@@ -5,7 +5,9 @@ import type { CanonicalMotionFrame } from '@rayure/protocol'
 
 import {
   Live2dParameterAdapter,
+  SHIMAKAZE_LIVE2D_RIG_PROFILE,
   STANDARD_LIVE2D_RIG_PROFILE,
+  resolveLive2dRigProfile,
   validateLive2dRigProfile,
 } from '../src/live2d/rig-profile.ts'
 
@@ -81,6 +83,35 @@ test('Live2D adapter maps alternating lower-body bend into Hiyori ParamLeg', () 
   }
   const values = new Map(new Live2dParameterAdapter().mapFrame(walkingFrame).map(update => [update.parameterId, update.value]))
   assert.equal(values.get('ParamLeg'), 1)
+})
+
+test('Shimakaze profile maps canonical legs to the model-specific parameter ids', () => {
+  const frame = makeFrame()
+  const walkingFrame: CanonicalMotionFrame = {
+    ...frame,
+    joints: {
+      ...frame.joints,
+      left_hip: { position: [-0.2, 1, 0.02], rotation: [0, 0, 0, 1] },
+      left_knee: { position: [-0.15, 0.5, 0.12], rotation: [0, 0, 0, 1] },
+      left_ankle: { position: [-0.2, 0, 0.04], rotation: [0, 0, 0, 1] },
+      left_toe: { position: [-0.2, -0.05, 0.18], rotation: [0, 0, 0, 1] },
+      right_hip: { position: [0.2, 1, 0], rotation: [0, 0, 0, 1] },
+      right_knee: { position: [0.25, 0.5, -0.1], rotation: [0, 0, 0, 1] },
+      right_ankle: { position: [0.2, 0, -0.04], rotation: [0, 0, 0, 1] },
+      right_toe: { position: [0.2, -0.05, 0.12], rotation: [0, 0, 0, 1] },
+    },
+  }
+  const values = new Map(new Live2dParameterAdapter(SHIMAKAZE_LIVE2D_RIG_PROFILE)
+    .mapFrame(walkingFrame)
+    .map(update => [update.parameterId, update.value]))
+  assert.ok(values.has('Param7'))
+  assert.ok(values.has('Param8'))
+  assert.ok(values.has('Param14'))
+  assert.ok(values.has('Param15'))
+  assert.ok(values.has('Param286'))
+  assert.ok(!values.has('ParamLeg'))
+  assert.equal(resolveLive2dRigProfile(['Param7', 'Param14', 'Param286']).id, SHIMAKAZE_LIVE2D_RIG_PROFILE.id)
+  assert.equal(resolveLive2dRigProfile(['ParamAngleX']).id, STANDARD_LIVE2D_RIG_PROFILE.id)
 })
 
 test('Live2D rig profiles reject duplicate parameters and invalid ranges', () => {

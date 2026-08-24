@@ -62,6 +62,8 @@ test('defaults remain safe for a missing Wallpaper Engine API', () => {
     fps: 30,
     accent: { r: 103, g: 232, b: 249 },
     modelScale: 1,
-    showStatus: true,
+    showStatus: false,
+    showBranding: false,
+    importNativeContent: false,
   })
 })

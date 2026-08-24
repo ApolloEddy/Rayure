@@ -58,6 +58,16 @@ async function main(): Promise<void> {
     onMotionPlayback: observation => {
       controller?.reportPlayback(observation)
     },
+    onMotionGenerate: input => {
+      if (controller === undefined) throw new Error('Motion generation controller is not ready')
+      return controller.submitIntent({
+        id: input.id,
+        prompt: input.prompt,
+        ...(input.numFrames === undefined ? {} : { numFrames: input.numFrames }),
+        ...(input.numDenoisingSteps === undefined ? {} : { numDenoisingSteps: input.numDenoisingSteps }),
+        ...(input.cfgWeight === undefined ? {} : { cfgWeight: input.cfgWeight }),
+      })
+    },
   })
   let visionRuntime: VisionRuntime | undefined
   let speechRuntime: SpeechRuntime | undefined
