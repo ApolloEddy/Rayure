@@ -8,6 +8,7 @@
 
 - 新增 Companion 内部 `BehaviorOrchestrator` 与 `rayure.behavior-event.v1` / `rayure.behavior-plan.v1` 基础类型，统一视觉、语音和直接指令的优先级、过期、去重、抢占取消与 generation 隔离；
 - 新增 `rayure.vision-observation.v1` 派生观察合同与 `VisionEventDetector`：在 Companion 内以迟滞、连续帧和冷却窗口识别 presence、头部方向、举手和挥手，不接收原始摄像头帧；
+- 新增 `VisionProcessClient` 与 `scripts/mediapipe-vision-bridge.py`：Bridge 使用 `shell:false`、16 KiB 行上限、受限诊断和失败关闭；Python 侧提供无依赖 `--simulate` 回归模式，并以 MediaPipe LIVE_STREAM 读取包外模型和摄像头后只输出派生观察；
 - 新增 Renderer → Companion 的 `motion.playback` 协议回执：仅当前已发布的动作描述符可上报有界、单调的 source-frame 进度；
 - 新增 Bridge 续写令牌合同和 `SceneEntityRegistry`：场景实体坐标经显式原点/比例变换后，可作为 `Hips`、双手、双脚的 ARDY 运动学目标，而语义 cache key 保持不变；
 - Bridge 结果现在携带不透明 continuation id；真实 ARDY Core 已验证带右手约束的 8 帧生成及使用同一语义特征的连续续写；
