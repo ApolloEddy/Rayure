@@ -3,12 +3,14 @@ import { fileURLToPath } from 'node:url'
 
 import { loadLocalConfig } from './local-config.ts'
 import type { RayureLocalConfig } from './local-config.ts'
+import { BehaviorOrchestrator } from './behavior/behavior-orchestrator.ts'
 import { createMotionSemanticRuntime } from './motion-semantic-runtime.ts'
 import type { MotionSemanticRuntime } from './motion-semantic-runtime.ts'
 import { MotionGenerationController } from './motion-generation-controller.ts'
 import { SceneEntityRegistry } from './scene-entity-registry.ts'
 import { createCompanionServer } from './server.ts'
 import type { CompanionServer } from './server.ts'
+import { VisionRuntime } from './vision-runtime.ts'
 
 const DEFAULT_PORT = 32145
 
@@ -28,6 +30,12 @@ async function main(): Promise<void> {
   const configPath = explicitConfigPath ?? fileURLToPath(new URL('../../../rayure.local.json', import.meta.url))
   const config = await loadLocalConfig(configPath, { optional: explicitConfigPath === undefined })
   const motionSemanticRuntime = await createMotionSemanticRuntime(config.motionSemantic)
+  const behavior = new BehaviorOrchestrator({
+    onError: (requestId, cause) => {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      process.stderr.write(`${JSON.stringify({ event: 'behavior.error', requestId, message })}\n`)
+    },
+  })
   const sceneEntities = new SceneEntityRegistry({
     ...(config.motionSemantic?.scene?.entities === undefined
       ? {}
@@ -45,6 +53,7 @@ async function main(): Promise<void> {
       controller?.reportPlayback(observation)
     },
   })
+  let visionRuntime: VisionRuntime | undefined
   try {
     const address = await server.start()
     process.stdout.write(`${JSON.stringify({
@@ -54,6 +63,7 @@ async function main(): Promise<void> {
       motionSemanticCacheEntries: motionSemanticRuntime.cache.size,
       motionSemanticEncoderAvailable: motionSemanticRuntime.resolver !== undefined,
       ardyAvailable: motionSemanticRuntime.ardy !== undefined,
+      visionEnabled: config.vision?.enabled === true,
     })}\n`)
 
     let stopping = false
@@ -61,7 +71,8 @@ async function main(): Promise<void> {
       if (stopping) return
       stopping = true
       process.stderr.write(`${JSON.stringify({ event: 'companion.stopping', signal })}\n`)
-      await Promise.all([server.stop(), motionSemanticRuntime.close()])
+      await Promise.all([server.stop(), motionSemanticRuntime.close(), visionRuntime?.close()])
+      behavior.close()
     }
 
     process.once('SIGINT', () => void shutdown('SIGINT'))
@@ -75,8 +86,19 @@ async function main(): Promise<void> {
       ;(globalThis as { rayureMotionGeneration?: MotionGenerationController }).rayureMotionGeneration = controller
       ;(globalThis as { rayureSceneEntities?: SceneEntityRegistry }).rayureSceneEntities = sceneEntities
     }
+    visionRuntime = new VisionRuntime({
+      ...(config.vision === undefined ? {} : { config: config.vision }),
+      orchestrator: behavior,
+      ...(controller === undefined ? {} : { controller }),
+      ...(config.motionSemantic?.startupGenerate === undefined ? {} : { presets: config.motionSemantic.startupGenerate }),
+      onError: cause => {
+        process.stderr.write(`${JSON.stringify({ event: 'vision.error', message: cause.message })}\n`)
+      },
+    })
   }
   catch (cause) {
+    behavior.close()
+    await visionRuntime?.close()
     await motionSemanticRuntime.close()
     throw cause
   }

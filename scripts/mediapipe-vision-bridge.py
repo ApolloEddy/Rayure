@@ -60,8 +60,9 @@ def run_simulation(args: argparse.Namespace) -> int:
         return fail("simulation interval is out of range")
     total = args.frames if args.frames > 0 else None
     frame_index = 0
+    started_at_ms = int(time.time() * 1000)
     while not STOP and (total is None or frame_index < total):
-        timestamp_ms = frame_index * args.interval_ms
+        timestamp_ms = started_at_ms + frame_index * args.interval_ms
         phase = frame_index % 6
         x = 0.22 if phase % 2 == 0 else 0.40
         observation = make_observation(
@@ -109,7 +110,7 @@ def run_camera(args: argparse.Namespace) -> int:
         capture.set(cv2.CAP_PROP_FPS, args.fps)
 
         def on_result(result: Any, _output_image: Any, timestamp_ms: int) -> None:
-            write_observation(observation_from_result(result, timestamp_ms))
+            write_observation(observation_from_result(result, int(time.time() * 1000), timestamp_ms))
 
         options = vision.PoseLandmarkerOptions(
             base_options=python.BaseOptions(model_asset_path=str(model_path)),
@@ -144,10 +145,10 @@ def run_camera(args: argparse.Namespace) -> int:
             capture.release()
 
 
-def observation_from_result(result: Any, timestamp_ms: int) -> dict[str, Any]:
+def observation_from_result(result: Any, observed_at_ms: int, frame_timestamp_ms: int) -> dict[str, Any]:
     poses = getattr(result, "pose_landmarks", None) or []
     if not poses:
-        return make_observation(f"frame-{timestamp_ms}", timestamp_ms, 0.0)
+        return make_observation(f"frame-{frame_timestamp_ms}", observed_at_ms, 0.0)
     landmarks = poses[0]
     nose = landmark(landmarks, 0)
     left_shoulder = landmark(landmarks, 11)
@@ -165,8 +166,8 @@ def observation_from_result(result: Any, timestamp_ms: int) -> dict[str, Any]:
         "confidence": presence,
     }
     return make_observation(
-        frame_id=f"frame-{timestamp_ms}",
-        observed_at_ms=timestamp_ms,
+        frame_id=f"frame-{frame_timestamp_ms}",
+        observed_at_ms=observed_at_ms,
         presence=presence,
         head=head,
         left_hand=hand_from_landmarks(left_wrist, left_shoulder),

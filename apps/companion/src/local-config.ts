@@ -14,6 +14,11 @@ import {
   validateArdyProcessTimeout,
 } from './ardy-process-client.ts'
 import type { CompanionModelSource, CompanionMotionSource } from './model-source.ts'
+import {
+  validateVisionProcessArgs,
+  validateVisionProcessCommand,
+  validateVisionProcessCwd,
+} from './vision-process-client.ts'
 
 const MAX_LOCAL_CONFIG_BYTES = 64 * 1024
 
@@ -21,6 +26,31 @@ export interface RayureLocalConfig {
   model?: CompanionModelSource | undefined
   motions?: readonly CompanionMotionSource[] | undefined
   motionSemantic?: RayureMotionSemanticConfig | undefined
+  vision?: RayureVisionConfig | undefined
+}
+
+export const visionActionTypes = [
+  'presence.enter',
+  'presence.leave',
+  'gesture.wave',
+  'gesture.hand_raise',
+  'head.left',
+  'head.right',
+  'head.center',
+] as const
+export type VisionActionType = typeof visionActionTypes[number]
+
+export interface RayureVisionConfig {
+  enabled: boolean
+  command: string
+  args: readonly string[]
+  cwd?: string | undefined
+  modelPath?: string | undefined
+  cameraIndex: number
+  fps: number
+  width: number
+  height: number
+  actions?: Partial<Record<VisionActionType, string>> | undefined
 }
 
 export interface RayureMotionSemanticConfig {
@@ -95,6 +125,7 @@ export async function loadLocalConfig(
   if (root.model !== undefined) allowedKeys.push('model')
   if (root.motions !== undefined) allowedKeys.push('motions')
   if (root.motionSemantic !== undefined) allowedKeys.push('motionSemantic')
+  if (root.vision !== undefined) allowedKeys.push('vision')
   requireExactKeys(root, allowedKeys, 'Rayure local config')
 
   let resolvedModel: CompanionModelSource | undefined
@@ -161,12 +192,67 @@ export async function loadLocalConfig(
   const motionSemantic = root.motionSemantic === undefined
     ? undefined
     : resolveMotionSemanticConfig(root.motionSemantic)
+  const vision = root.vision === undefined ? undefined : resolveVisionConfig(root.vision)
 
   return {
     ...(resolvedModel ? { model: resolvedModel } : {}),
     ...(resolvedMotions ? { motions: resolvedMotions } : {}),
     ...(motionSemantic ? { motionSemantic } : {}),
+    ...(vision ? { vision } : {}),
   }
+}
+
+function resolveVisionConfig(value: unknown): RayureVisionConfig {
+  const root = requireRecord(value, 'vision config')
+  const allowedKeys = ['enabled', 'command', 'args']
+  if (root.cameraIndex !== undefined) allowedKeys.push('cameraIndex')
+  if (root.fps !== undefined) allowedKeys.push('fps')
+  if (root.width !== undefined) allowedKeys.push('width')
+  if (root.height !== undefined) allowedKeys.push('height')
+  if (root.cwd !== undefined) allowedKeys.push('cwd')
+  if (root.modelPath !== undefined) allowedKeys.push('modelPath')
+  if (root.actions !== undefined) allowedKeys.push('actions')
+  requireExactKeys(root, allowedKeys, 'vision config')
+  if (typeof root.enabled !== 'boolean') throw new Error('vision enabled must be boolean')
+  if (!Array.isArray(root.args)) throw new Error('vision args must be an array')
+  const args = validateVisionProcessArgs(root.args)
+  const reservedArgs = new Set(['--model', '--camera-index', '--fps', '--width', '--height'])
+  if (args.some(arg => reservedArgs.has(arg))) throw new Error('vision args must not contain reserved runtime options')
+  const modelPath = root.modelPath === undefined ? undefined : requireVisionModelPath(root.modelPath)
+  if (root.enabled && modelPath === undefined && !args.includes('--simulate')) {
+    throw new Error('enabled vision config requires modelPath unless args contains --simulate')
+  }
+  const actions = root.actions === undefined ? undefined : resolveVisionActions(root.actions)
+  return {
+    enabled: root.enabled,
+    command: validateVisionProcessCommand(root.command),
+    args,
+    cameraIndex: root.cameraIndex === undefined ? 0 : requireGenerateInteger(root.cameraIndex, 'vision cameraIndex', 0, 32),
+    fps: root.fps === undefined ? 8 : requireGenerateInteger(root.fps, 'vision fps', 1, 30),
+    width: root.width === undefined ? 640 : requireGenerateInteger(root.width, 'vision width', 160, 1920),
+    height: root.height === undefined ? 360 : requireGenerateInteger(root.height, 'vision height', 120, 1080),
+    ...(root.cwd === undefined ? {} : { cwd: validateVisionProcessCwd(root.cwd) }),
+    ...(modelPath === undefined ? {} : { modelPath }),
+    ...(actions === undefined ? {} : { actions }),
+  }
+}
+
+function resolveVisionActions(value: unknown): Partial<Record<VisionActionType, string>> {
+  const root = requireRecord(value, 'vision actions')
+  const allowedKeys = Object.keys(root)
+  if (allowedKeys.some(key => !visionActionTypes.includes(key as VisionActionType))) {
+    throw new Error('vision actions contains an unsupported event type')
+  }
+  const actions: Partial<Record<VisionActionType, string>> = {}
+  for (const key of allowedKeys as VisionActionType[]) actions[key] = requireIdentifier(root[key])
+  return actions
+}
+
+function requireVisionModelPath(value: unknown): string {
+  if (typeof value !== 'string' || !isAbsolute(value) || value.trim() !== value || value.includes('\u0000')) {
+    throw new Error('vision modelPath must be an absolute path')
+  }
+  return value
 }
 
 function resolveMotionSemanticConfig(value: unknown): RayureMotionSemanticConfig {

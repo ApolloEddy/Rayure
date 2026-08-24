@@ -203,3 +203,46 @@ test('local config validates static scene entities and their ARDY coordinate tra
     await assert.rejects(loadLocalConfig(configPath), /scene|vector|duplicated|scale|fields/i)
   }
 })
+
+test('local config resolves opt-in simulated vision with safe defaults and action allowlist', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'rayure-vision-config-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const configPath = join(root, 'rayure.local.json')
+  await writeFile(configPath, JSON.stringify({
+    vision: {
+      enabled: true,
+      command: process.execPath,
+      args: ['bridge.js', '--simulate'],
+      actions: { 'gesture.wave': 'wave.casual' },
+    },
+  }))
+  const config = await loadLocalConfig(configPath)
+  assert.deepEqual(config.vision, {
+    enabled: true,
+    command: process.execPath,
+    args: ['bridge.js', '--simulate'],
+    cameraIndex: 0,
+    fps: 8,
+    width: 640,
+    height: 360,
+    actions: { 'gesture.wave': 'wave.casual' },
+  })
+})
+
+test('local config rejects unsafe or ambiguous vision settings', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'rayure-vision-config-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const configPath = join(root, 'rayure.local.json')
+  const invalidValues: unknown[] = [
+    { vision: { enabled: 'yes', command: 'python', args: ['--simulate'] } },
+    { vision: { enabled: true, command: 'python', args: [] } },
+    { vision: { enabled: true, command: 'python', args: ['--simulate', '--fps'], fps: 0 } },
+    { vision: { enabled: true, command: 'python', args: ['--simulate', '--model'] } },
+    { vision: { enabled: true, command: 'python', args: ['--simulate'], actions: { unknown: 'wave' } } },
+    { vision: { enabled: true, command: 'python', args: ['--simulate'], cameraIndex: 99 } },
+  ]
+  for (const value of invalidValues) {
+    await writeFile(configPath, JSON.stringify(value))
+    await assert.rejects(loadLocalConfig(configPath), /vision|enabled|modelPath|reserved|fps|action|camera/i, JSON.stringify(value))
+  }
+})
