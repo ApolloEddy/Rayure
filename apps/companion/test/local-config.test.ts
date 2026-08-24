@@ -303,6 +303,7 @@ test('local config rejects unsafe speech process settings', async (t) => {
     { speech: { enabled: true, liveTalker: { baseUrl: 'http://example.com:8020' } } },
     { speech: { enabled: true, liveTalker: { baseUrl: 'http://127.0.0.1:8020', timeoutMs: 1 } } },
     { speech: { enabled: true, liveTalker: { baseUrl: 'http://127.0.0.1:8020', motionByKeyword: { wave: 'bad id' } } } },
+    { speech: { enabled: true, liveTalker: { baseUrl: 'http://127.0.0.1:8020', motionByKeyword: { wave: 1 } } } },
     { speech: { enabled: true, agent: { endpoint: 'https://example.com/agent', timeoutMs: 1 } } },
     { speech: { enabled: true, tts: { command: 'node', args: ['x'], requestTimeoutMs: 1 } } },
     { speech: { enabled: true, asr: { command: 'node', args: ['x'], startupTimeoutMs: 1 } } },

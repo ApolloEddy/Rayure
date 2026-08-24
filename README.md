@@ -20,7 +20,7 @@ ASR 最终转录 -> Agent 结构化计划 -> BehaviorOrchestrator
        |- Live2D Adapter（当前主线，Hiyori 已验收）
        `- 3D Adapter（冻结回归基线）
 
-Agent 计划中的 replyText -> TTS（fixture 或包外 JSONL 小模型）
+Agent 计划中的 replyText -> LiveTalker TTS / fixture / 包外 JSONL 小模型
   -> speech.published（音频 URL + mouth-cues URL）
   -> SpeechPlayer -> Live2D mouth channel + speech.playback
 ```
@@ -33,10 +33,10 @@ Agent 计划中的 replyText -> TTS（fixture 或包外 JSONL 小模型）
 - **Live2D 原生渲染**：生成动作、原生动作和 debug fixture 现在是互斥的单一参数写入者；20 fps Canonical Motion 在渲染帧间做位置线性插值和四元数 slerp，生成开始采用 180 ms 参数混合，根位移投影到画布且 Hiyori `ParamLeg` 会表达步态。
 - **浏览器构建**：冻结的 PMX/MMD 主机按需加载；第三方依赖的 Node-only 可选分支有明确浏览器 stub，不再产生 Vite browser-external 告警，最大 JS 分块为 380 kB。
 - **视觉事件**：`VisionProcessClient` + `scripts/mediapipe-vision-bridge.py` 只接受严格的派生观察；presence、头向、举手、挥手采用迟滞/连续帧/冷却窗口，事件 action 通过 allowlist 接入动作策略。`--simulate` 可在无摄像头/模型环境回归。
-- **语音事件**：`SpeechRuntime` 支持 `globalThis.rayureSpeech.submitText(...)` 和包外 ASR JSONL；Agent 可用 loopback/HTTPS HTTP adapter 替换；TTS 可用 fixture 或包外 JSONL；所有 provider 调用具备 signal/generation 抢占边界。
+- **语音事件**：`SpeechRuntime` 支持 `globalThis.rayureSpeech.submitText(...)` 和包外 ASR JSONL；已提供 LiveTalker `/api/chat` 与 `/api/synthesize` 兼容适配器，Agent 输出会转换为结构化 `BehaviorPlan`，TTS WAV 会转换为口型曲线；所有 provider 调用具备 signal/generation 抢占边界。
 - **音频与口型**：Companion 只发布 token 化音频和 `rayure.mouth-cues.v1` 曲线；Wallpaper `SpeechPlayer` 驱动 `ParamMouthOpenY` 类参数并回报 `speech.playback`。
 
-`CHANGELOG.md` 已记录 2026-08-24 的未发布变更（最新开发基线为 `0.6.0-dev`，此前的 3D 记录为 0.4.8），根工作区 manifest 仍为 0.2.0。本仓库应视为开发快照。当前统一验证 187 项测试（协议 21、Companion 106、Wallpaper 60）、TypeScript、Python bridge 编译、生产构建与发布边界审计全部通过。
+`CHANGELOG.md` 已记录 2026-08-24 的未发布变更（最新开发基线为 `0.6.0-dev`，此前的 3D 记录为 0.4.8），根工作区 manifest 仍为 0.2.0。本仓库应视为开发快照。当前统一验证 190 项测试（协议 21、Companion 109、Wallpaper 60）、TypeScript、四条 Python bridge 编译、生产构建与发布边界审计全部通过。
 
 ## 已实现
 
@@ -50,7 +50,7 @@ Agent 计划中的 replyText -> TTS（fixture 或包外 JSONL 小模型）
 - ARDY 动作生成：进程协议、语义特征缓存（内存/文件、fp16/fp32、token mask）、Text Encoder API 客户端（可选）、启动预设生成、实体坐标约束与实时意图入口 `globalThis.rayureMotionGeneration`；
 - BehaviorOrchestrator：统一视觉、语音和直接行为的优先级、去重、过期、抢占取消与 generation 隔离；
 - 摄像头/MediaPipe：包外 Python Bridge、派生观察合同、低频事件检测和 allowlist 动作策略；
-- ASR → Agent → TTS/口型：ASR/Agent/TTS 的 provider-neutral 合同、包外 JSONL adapters、loopback/HTTPS Agent adapter、tokenized speech gateway、Wallpaper `SpeechPlayer` 和 playback telemetry；
+- ASR → Agent → TTS/口型：ASR/Agent/TTS 的 provider-neutral 合同、LiveTalker HTTP 兼容适配器、包外 JSONL adapters、tokenized speech gateway、Wallpaper `SpeechPlayer` 和 playback telemetry；
 - 模型和动作异步加载的 generation 隔离、失败保留、迟到结果释放与资源清理；
 - `scripts/verify.ps1` 统一执行测试、TypeScript、生产构建、依赖审计和发布边界检查。
 
@@ -98,6 +98,7 @@ Wallpaper Engine / CEF
 - 用 `speech.asr` 指向包外 ASR JSONL 进程；进程只输出 `rayure.asr-transcript.v1` 最终转录；
 - 用 `speech.agent.endpoint` 指向 loopback/HTTPS Agent，响应必须是 `rayure.agent-response.v1` 的 `BehaviorPlan`；未配置时使用可替换的规则 fixture；
 - 用 `speech.tts` 指向包外 TTS JSONL 进程，或先用 fixture；TTS 输出 WAV/OGG/WebM 与 `rayure.mouth-cues.v1`；
+- 用 `speech.liveTalker` 对接本机 `D:\CodingProjects\BigModel\LiveTalker`：`/api/chat` 提供 DeepSeek V4 Flash 非思考回复，`/api/synthesize` 提供 Qwen3-TTS WAV；`scripts/livetalker-asr-bridge.py` 复用 LiveTalker 的 SenseVoice 和麦克风/VAD；
 - 通过 `globalThis.rayureSpeech.submitText('挥手')` 做不依赖麦克风的本地 smoke test。
 
 示例配置（所有路径只存在于未跟踪的 `rayure.local.json`）：
@@ -123,6 +124,53 @@ Wallpaper Engine / CEF
     }
   }
 }
+```
+
+### LiveTalker 实战配置
+
+`speech.liveTalker` 会同时接管 Rayure 的 Agent 和 TTS；它不能与同一 `speech` 节点下的 `agent` 或 `tts` 并存。ASR 仍通过独立进程输出最终转录：
+
+```json
+{
+  "speech": {
+    "enabled": true,
+    "liveTalker": {
+      "baseUrl": "http://127.0.0.1:8020",
+      "timeoutMs": 30000,
+      "language": "Chinese",
+      "motionByKeyword": {
+        "挥手": "wave",
+        "举手": "hand_raise",
+        "左边": "head_left",
+        "右边": "head_right"
+      }
+    },
+    "asr": {
+      "command": "python",
+      "args": [
+        "D:/CodingProjects/Mixed_Language/Rayure/scripts/livetalker-asr-bridge.py",
+        "--livetalker-root",
+        "D:/CodingProjects/BigModel/LiveTalker",
+        "--config",
+        "D:/CodingProjects/BigModel/LiveTalker/config.yaml"
+      ],
+      "cwd": "D:/CodingProjects/BigModel/LiveTalker",
+      "startupTimeoutMs": 60000
+    }
+  }
+}
+```
+
+启动顺序：
+
+1. 在 `D:\CodingProjects\BigModel\LiveTalker` 中启动 `python main.py --server`，确认本机 `http://127.0.0.1:8020/health` 返回正常；API Key 继续由 LiveTalker 的受保护环境变量读取，不写入此配置。
+2. 在 Rayure 根目录启动 `pnpm dev:companion`。
+3. Wallpaper Engine 或 `pnpm dev:wallpaper` 连接 `127.0.0.1:32145` 后，使用 `globalThis.rayureSpeech.submitText('挥手')` 做首轮 Agent/TTS/口型 smoke test，再打开麦克风验收 ASR。
+
+`--simulate` 只验证 Rayure ASR JSONL 合同，不会加载 LiveTalker 模型：
+
+```powershell
+python scripts/livetalker-asr-bridge.py --simulate --text 挥手
 ```
 
 `speech.agent.endpoint` 不承载密钥；凭据若由实际 Agent 需要，应由包外进程/受保护存储管理，不写入配置、命令行或日志。
@@ -211,7 +259,7 @@ pnpm dev:wallpaper   # 端口 4173
 - ARDY 待机动作池、预测式 replan buffer 和跨段姿态 crossfade；
 - 经过实机验证的 FullBody ARDY constraints（当前只开放 Hips、双手、双脚）；
 - 合规获取的离线 Cubism Core 文件，以及本轮生成播放在 Wallpaper Engine CEF 中的画面、DevTools、暂停/恢复实机验收；
-- 真实 ASR/LLM/TTS provider 的模型质量、麦克风权限和摄像头设备验收（代码链路与无依赖模拟已完成）；
+- LiveTalker 实际 SenseVoice/DeepSeek/Qwen3-TTS 的模型质量、API Key、麦克风权限和长时间运行验收（兼容接口与无依赖模拟已完成）；
 - 首次配对、设置界面、自动启动、升级、多显示器、睡眠唤醒和长时间稳定性验收；
 - 可公开再分发的默认角色/场景与正式 Wallpaper Engine Workshop 包。
 

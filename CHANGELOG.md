@@ -35,6 +35,7 @@
 - 修复 ARDY continuation 错误取“全局最近状态”及 Canonical Motion 不可逆地重建内部 tensor 的问题；
 - 修复约束 index tensor 的 CPU/CUDA 设备错配、EndEffector 缺少 Hips 条件导致的断言失败，以及多行 Bridge 错误无法通过 JSONL 合同的问题；
 - 修复 Vite 将 `node:fs/promises` 与 `node:url` 外置到浏览器 bundle 的构建告警。
+- 修复 `speech.liveTalker.motionByKeyword` 对非字符串动作意图的校验漏洞，避免数字等可强制转换值绕过配置边界。
 
 ### 验证
 

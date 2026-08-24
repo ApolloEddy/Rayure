@@ -217,7 +217,7 @@ function normalizeMotionMap(value: Readonly<Record<string, string>>): Readonly<R
   const normalized: Record<string, string> = {}
   for (const [keyword, intent] of entries) {
     if (keyword.length < 1 || keyword.length > 96 || /[\u0000-\u001F\u007F]/u.test(keyword)) throw new Error('LiveTalker motion keyword is invalid')
-    if (!/^[A-Za-z0-9._:-]{1,96}$/u.test(intent)) throw new Error('LiveTalker motion intent is invalid')
+    if (typeof intent !== 'string' || !/^[A-Za-z0-9._:-]{1,96}$/u.test(intent)) throw new Error('LiveTalker motion intent is invalid')
     normalized[keyword.toLowerCase()] = intent
   }
   return normalized
