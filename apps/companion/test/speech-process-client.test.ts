@@ -37,3 +37,17 @@ test('speech process client fails closed on malformed output and bounded setting
   assert.throws(() => validateSpeechProcessArgs(['ok\n']), /arg/i)
   await client.close()
 })
+
+test('speech process client reports a non-zero bridge exit', async () => {
+  const errors: string[] = []
+  const client = new SpeechProcessClient({
+    command: process.execPath,
+    args: ['-e', 'process.exit(2)'],
+    startupTimeoutMs: 1000,
+    onTranscript: () => undefined,
+    onError: cause => errors.push(cause.message),
+  })
+  for (let index = 0; index < 20 && errors.length === 0; index += 1) await new Promise(resolve => setTimeout(resolve, 10))
+  assert.match(errors[0] ?? '', /exited with code 2/i)
+  await client.close()
+})

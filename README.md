@@ -4,13 +4,14 @@ Rayure 是一个面向 Wallpaper Engine 的本地优先桌面角色运行时。�
 
 ## 当前状态
 
-**语义动作生成到 Live2D 播放的主链已闭环**：文本意图 → 语义特征缓存 → ARDY 扩散模型（本地 GPU）→ Canonical Motion → 令牌化广播 → 原生 Cubism 参数与画布运动。全程无云端推理依赖。
+**视觉与语音的代码主链已经接通**：摄像头/MediaPipe 只在包外进程内派生低频观察，经过事件检测和行为调度进入动作生成；ASR 最终转录 → Agent 结构化行为计划 → 动作/TTS → 令牌化音频与口型曲线 → Wallpaper 播放。所有大数据仍走回环 token URL，不进入 16 KiB websocket，也不把原始摄像头/音频送进 Renderer。
 
 2026-08-24 的连续性修复已完成：Renderer 会把实际播放帧回报给 Companion；下一段只续写该已确认前缀；Bridge 使用不透明 continuation 而非猜测 Canonical JSON；生成动作独占 Live2D 参数写入、插值并平滑回到原生 Idle。普通浏览器和自动化回归已通过；本轮新增播放逻辑仍需在 Wallpaper Engine CEF 中完成视觉/DevTools 门禁，不能把浏览器结果误报为该门禁已关闭。
 
 ```text
-Rayure Behavior（未来 ASR/LLM 意图层）
-  -> 动作意图 / Prompt
+MediaPipe 派生观察 -> VisionEventDetector -> BehaviorOrchestrator
+ASR 最终转录 -> Agent 结构化计划 -> BehaviorOrchestrator
+  -> 动作意图 / Prompt -----------------------------+
   -> Motion Semantic Feature Cache（AutoDL 一次性预置，30k 条）
   -> ARDY Bridge（本地 Python 子进程，RTX 4060 实测）
   -> Canonical Motion（27 关节，renderer 无关）
@@ -18,6 +19,10 @@ Rayure Behavior（未来 ASR/LLM 意图层）
   -> Rig Adapter
        |- Live2D Adapter（当前主线，Hiyori 已验收）
        `- 3D Adapter（冻结回归基线）
+
+Agent 计划中的 replyText -> TTS（fixture 或包外 JSONL 小模型）
+  -> speech.published（音频 URL + mouth-cues URL）
+  -> SpeechPlayer -> Live2D mouth channel + speech.playback
 ```
 
 已完成的里程碑：
@@ -27,8 +32,11 @@ Rayure Behavior（未来 ASR/LLM 意图层）
 - **MotionScheduler 连续调度**：`advance()` 仅保留给 headless 测试；生产续写只采用 Renderer 的 `motion.playback` 回执。抢占会取消生成器实际收到的 signal，发布失败的未观察 buffer 会回滚。
 - **Live2D 原生渲染**：生成动作、原生动作和 debug fixture 现在是互斥的单一参数写入者；20 fps Canonical Motion 在渲染帧间做位置线性插值和四元数 slerp，生成开始采用 180 ms 参数混合，根位移投影到画布且 Hiyori `ParamLeg` 会表达步态。
 - **浏览器构建**：冻结的 PMX/MMD 主机按需加载；第三方依赖的 Node-only 可选分支有明确浏览器 stub，不再产生 Vite browser-external 告警，最大 JS 分块为 380 kB。
+- **视觉事件**：`VisionProcessClient` + `scripts/mediapipe-vision-bridge.py` 只接受严格的派生观察；presence、头向、举手、挥手采用迟滞/连续帧/冷却窗口，事件 action 通过 allowlist 接入动作策略。`--simulate` 可在无摄像头/模型环境回归。
+- **语音事件**：`SpeechRuntime` 支持 `globalThis.rayureSpeech.submitText(...)` 和包外 ASR JSONL；Agent 可用 loopback/HTTPS HTTP adapter 替换；TTS 可用 fixture 或包外 JSONL；所有 provider 调用具备 signal/generation 抢占边界。
+- **音频与口型**：Companion 只发布 token 化音频和 `rayure.mouth-cues.v1` 曲线；Wallpaper `SpeechPlayer` 驱动 `ParamMouthOpenY` 类参数并回报 `speech.playback`。
 
-`CHANGELOG.md` 已记录 2026-08-24 的未发布变更（最新开发基线为 `0.6.0-dev`，此前的 3D 记录为 0.4.8），根工作区 manifest 仍为 0.2.0。本仓库应视为开发快照。当前统一验证 150 项测试、TypeScript、Python Bridge 编译、生产构建与发布边界审计全部通过。
+`CHANGELOG.md` 已记录 2026-08-24 的未发布变更（最新开发基线为 `0.6.0-dev`，此前的 3D 记录为 0.4.8），根工作区 manifest 仍为 0.2.0。本仓库应视为开发快照。当前统一验证 186 项测试（协议 21、Companion 105、Wallpaper 60）、TypeScript、Python bridge 编译、生产构建与发布边界审计全部通过。
 
 ## 已实现
 
@@ -40,6 +48,9 @@ Rayure Behavior（未来 ASR/LLM 意图层）
 - 严格的 27 关节 `Canonical Motion v1` 合同与校验；
 - Live2D：`.model3.json` 清单校验、标准参数 RigProfile、原生 Cubism 调试画布（Core 来源受控）、motion3 动作目录、互斥播放槽、Canonical Motion 插值/根位移/步态映射；
 - ARDY 动作生成：进程协议、语义特征缓存（内存/文件、fp16/fp32、token mask）、Text Encoder API 客户端（可选）、启动预设生成、实体坐标约束与实时意图入口 `globalThis.rayureMotionGeneration`；
+- BehaviorOrchestrator：统一视觉、语音和直接行为的优先级、去重、过期、抢占取消与 generation 隔离；
+- 摄像头/MediaPipe：包外 Python Bridge、派生观察合同、低频事件检测和 allowlist 动作策略；
+- ASR → Agent → TTS/口型：ASR/Agent/TTS 的 provider-neutral 合同、包外 JSONL adapters、loopback/HTTPS Agent adapter、tokenized speech gateway、Wallpaper `SpeechPlayer` 和 playback telemetry；
 - 模型和动作异步加载的 generation 隔离、失败保留、迟到结果释放与资源清理；
 - `scripts/verify.ps1` 统一执行测试、TypeScript、生产构建、依赖审计和发布边界检查。
 
@@ -60,7 +71,10 @@ Wallpaper Engine / CEF
        |- Motion Semantic Feature Cache
        |- MotionScheduler（Renderer 回执、打断/续写调度）
        |- SceneEntityRegistry（坐标变换/目标约束）
-       `- ARDY Bridge 子进程（JSONL / stdio）
+       |- BehaviorOrchestrator
+       |- VisionProcessClient -> MediaPipe Bridge（仅派生观察）
+       |- SpeechRuntime -> ASR/Agent/TTS adapters
+       `- ARDY / ASR / TTS Bridge 子进程（JSONL / stdio）
                  |
                  v
            本地 GPU 推理（RTX 4060 实测）
@@ -74,6 +88,44 @@ Wallpaper Engine / CEF
 2. **本地运行**：Companion 启动时加载缓存（30k 条约 40 秒），`startupGenerate` 预设直接缓存命中并生成；运行时可通过 `globalThis.rayureMotionGeneration.submitIntent(...)` 注入新意图，也可指定已注册实体目标。
 3. **生成与发布**：ARDY Bridge 按请求生成新帧（numFrames 为新增帧数，内部多步自回归 + history 裁剪），转成 Canonical Motion 后以 `/assets/<token>/<motionId>.json` 提供并广播。每个结果携带仅供 Companion/Bridge 使用的不透明 continuation id。
 4. **播放与续写**：Wallpaper 收到 `motion.published` 后经令牌化 URL 拉取、严格校验，交给 `CanonicalMotionPlayer` 插值驱动 Live2D；每个实际消费的 source frame 经 `motion.playback` 回报，下一意图只使用当前描述符和该确认帧数的 continuation。
+
+## 视觉与语音链路
+
+视觉是显式 opt-in 的 Companion 子进程能力。Python Bridge 在自己拥有摄像头和 MediaPipe 生命周期，输出 `rayure.vision-observation.v1` 的 presence、头向、手部坐标等派生字段；事件检测器只以低频、迟滞后的 `BehaviorEvent` 进入动作策略。没有 `modelPath` 或 `--simulate` 时，配置不会启动视觉进程。
+
+语音默认也不启动。启用后可以：
+
+- 用 `speech.asr` 指向包外 ASR JSONL 进程；进程只输出 `rayure.asr-transcript.v1` 最终转录；
+- 用 `speech.agent.endpoint` 指向 loopback/HTTPS Agent，响应必须是 `rayure.agent-response.v1` 的 `BehaviorPlan`；未配置时使用可替换的规则 fixture；
+- 用 `speech.tts` 指向包外 TTS JSONL 进程，或先用 fixture；TTS 输出 WAV/OGG/WebM 与 `rayure.mouth-cues.v1`；
+- 通过 `globalThis.rayureSpeech.submitText('挥手')` 做不依赖麦克风的本地 smoke test。
+
+示例配置（所有路径只存在于未跟踪的 `rayure.local.json`）：
+
+```json
+{
+  "vision": {
+    "enabled": true,
+    "command": "python",
+    "args": ["D:/.../scripts/mediapipe-vision-bridge.py", "--simulate"],
+    "actions": { "gesture.wave": "wave.casual" }
+  },
+  "speech": {
+    "enabled": true,
+    "asr": {
+      "command": "python",
+      "args": ["D:/.../scripts/speech-bridge.py", "--simulate", "--text", "挥手"]
+    },
+    "agent": { "endpoint": "http://127.0.0.1:8123/agent" },
+    "tts": {
+      "command": "python",
+      "args": ["D:/.../scripts/tts-bridge.py", "--simulate"]
+    }
+  }
+}
+```
+
+`speech.agent.endpoint` 不承载密钥；凭据若由实际 Agent 需要，应由包外进程/受保护存储管理，不写入配置、命令行或日志。
 
 ## 环境
 
@@ -151,7 +203,7 @@ pnpm dev:wallpaper   # 端口 4173
 
 1. **衔接与预取**：加入 replan buffer 式提前生成与多段姿态 crossfade，缩小长推理时“请求时已确认前缀”和“结果到达时当前姿态”之间的时差；
 2. **约束交互**：把目前的 Hips/手/脚 Root2D/EndEffector 扩展到经实测的 FullBody 约束和动态场景采样；
-3. **行为层**：ASR/LLM 意图接入 `submitIntent`，TTS 口型与视觉派生事件；
+3. **真实 provider 与实机验收**：用实际 ASR/Agent/TTS/MediaPipe 模型替换 fixture，完成真实麦克风、摄像头、Wallpaper Engine CEF 和长时间运行验收；
 4. Live2D 闭环稳定后，让现有 3D Renderer 作为第二个 Rig Adapter 回归。
 
 ## 尚未完成
@@ -159,8 +211,7 @@ pnpm dev:wallpaper   # 端口 4173
 - ARDY 待机动作池、预测式 replan buffer 和跨段姿态 crossfade；
 - 经过实机验证的 FullBody ARDY constraints（当前只开放 Hips、双手、双脚）；
 - 合规获取的离线 Cubism Core 文件，以及本轮生成播放在 Wallpaper Engine CEF 中的画面、DevTools、暂停/恢复实机验收；
-- ASR、LLM、TTS、口型和音频播放；
-- 摄像头、MediaPipe 与最小化派生视觉事件；
+- 真实 ASR/LLM/TTS provider 的模型质量、麦克风权限和摄像头设备验收（代码链路与无依赖模拟已完成）；
 - 首次配对、设置界面、自动启动、升级、多显示器、睡眠唤醒和长时间稳定性验收；
 - 可公开再分发的默认角色/场景与正式 Wallpaper Engine Workshop 包。
 

@@ -51,10 +51,15 @@ export class SpeechProcessClient {
     this.#child.stdin.on('error', cause => this.#fail(new Error(`ASR process stdin failed: ${cause.message}`)))
     this.#child.on('error', cause => this.#fail(cause))
     this.#child.on('close', (code, signal) => {
-      if (this.#closed) return
-      this.#closed = true
+      const wasClosed = this.#closed
       this.#onExit?.(code, signal)
-      if (code !== 0 && code !== null) this.#fail(new Error(`ASR process exited with code ${code}${this.#stderrSummary()}`))
+      if (!wasClosed && code !== 0 && code !== null) {
+        this.#closed = false
+        this.#fail(new Error(`ASR process exited with code ${code}${this.#stderrSummary()}`))
+      }
+      else {
+        this.#closed = true
+      }
     })
     setTimeout(() => {
       if (!this.#closed && this.#child.exitCode === null && Date.now() - this.#startedAt >= this.#startupTimeoutMs && this.#transcriptCount === 0) {

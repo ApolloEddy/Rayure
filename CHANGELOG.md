@@ -35,7 +35,7 @@
 
 ### 验证
 
-- 协议 20 项、Companion 73 项、Wallpaper 57 项测试通过；TypeScript、Python Bridge 编译和生产构建通过；
+- 协议 21 项、Companion 105 项、Wallpaper 60 项测试通过；TypeScript、三条 Python bridge 编译、生产构建、依赖审计和发布边界检查通过；
 - 发布边界仍保持：私有模型、动作、场景、缓存和本地配置不会进入 Git 或 Wallpaper `dist`。Wallpaper Engine CEF 的新生成播放视觉/DevTools 门禁仍单独保留。
 
 ## [0.6.0-dev] - 2026-08-23
