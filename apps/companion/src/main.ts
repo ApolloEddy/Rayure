@@ -212,7 +212,7 @@ function createGenerationController(
 ): MotionGenerationController | undefined {
   if (config.motionSemantic?.ardy === undefined) return undefined
   const service = runtime.createGenerationService()
-  return new MotionGenerationController({
+  const controller = new MotionGenerationController({
     generate: async (intent, history) => {
       const constraints = intent.target === undefined
         ? undefined
@@ -224,13 +224,19 @@ function createGenerationController(
         numDenoisingSteps: intent.numDenoisingSteps ?? 4,
         cfgWeight: intent.cfgWeight ?? 2,
         ...(intent.signal === undefined ? {} : { signal: intent.signal }),
-        ...(history?.continuationId === undefined
-          ? history === undefined ? {} : { history: history.motion }
+        // The ARDY build accepts either an opaque continuation id or a fresh
+        // segment — it deliberately refuses to rehydrate pose from JSON frames,
+        // so consumed frames are never sent. A continuation id is only included
+        // when the scheduler still holds one for the live bridge; after an
+        // auto-heal restart the id is forgotten and the next generation is a
+        // fresh segment.
+        ...(history === undefined || history.continuationId === undefined
+          ? {}
           : {
               continuation: {
                 id: history.continuationId,
                 consumedFrameCount: history.consumedFrameCount,
-            },
+              },
             }),
         ...(constraints === undefined ? {} : { constraints }),
       })
@@ -258,6 +264,12 @@ function createGenerationController(
       process.stderr.write(`${JSON.stringify({ event: 'motion.generate.error', intentId, message })}\n`)
     },
   })
+  // When the auto-heal restarts the ARDY bridge, continuation ids the scheduler
+  // holds become invalid on the new process. Forget them so the next generation
+  // re-encodes the consumed frames as JSON history instead of hitting a dead
+  // continuation.
+  runtime.onArdyRestart(() => controller.forgetBackendContinuation())
+  return controller
 }
 
 main().catch((cause: unknown) => {

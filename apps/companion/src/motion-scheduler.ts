@@ -311,6 +311,22 @@ export class MotionScheduler {
     this.#lastConsumedFrameCount = 0
   }
 
+  /**
+   * Drops any held opaque continuation ids after the ARDY bridge restarted:
+   * ids minted by the old process are invalid on the new one. The consumed
+   * frames stay, but the bridge refuses to rehydrate pose from JSON frames, so
+   * the next generation after a restart is a fresh segment rather than a
+   * continuation (the auto-heal retry re-establishes the chain).
+   */
+  forgetContinuation(): void {
+    if (this.#bufferSegment !== undefined) {
+      this.#bufferSegment.continuationId = undefined
+    }
+    if (this.#prefetchedSegment !== undefined) {
+      this.#prefetchedSegment.continuationId = undefined
+    }
+  }
+
   dispose(): void {
     this.clear()
     this.#consumers.clear()

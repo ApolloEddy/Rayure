@@ -45,3 +45,6 @@ apps/wallpaper/public/assets/scenes/
 
 # Machine-local Companion configuration may contain private absolute asset paths.
 rayure.local.json
+
+# This repo is pnpm-managed; a stray npm lockfile only adds noise.
+package-lock.json

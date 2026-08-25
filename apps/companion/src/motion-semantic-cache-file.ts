@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
@@ -36,6 +37,14 @@ export async function loadMotionSemanticFeatureCacheFile(
   filePath: string,
 ): Promise<readonly MotionSemanticFeature[]> {
   const raw = await readFile(filePath)
+  if (raw.byteLength > MAX_MOTION_SEMANTIC_CACHE_FILE_BYTES) {
+    throw new Error('Motion semantic feature cache exceeds 512 MiB')
+  }
+  return parseMotionSemanticFeatureCache(raw.toString('utf8'))
+}
+
+export function loadMotionSemanticFeatureCacheFileSync(filePath: string): readonly MotionSemanticFeature[] {
+  const raw = readFileSync(filePath)
   if (raw.byteLength > MAX_MOTION_SEMANTIC_CACHE_FILE_BYTES) {
     throw new Error('Motion semantic feature cache exceeds 512 MiB')
   }

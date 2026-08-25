@@ -211,6 +211,52 @@ test('renderer progress selects the exact continuation prefix and rejects stale 
   assert.equal(seenHistory[1]?.motion.frames.length, 2)
 })
 
+test('forgetContinuation drops held ids so the next intent is a fresh segment', async () => {
+  const seenHistory: Array<MotionScheduleHistory | undefined> = []
+  const scheduler = new MotionScheduler({
+    generator: async (intent, history) => {
+      seenHistory.push(history)
+      return {
+        motion: makeMotion(5, 50),
+        ...(intent.id === 'a' ? { continuationId: 'bridge-continuation-1' } : {}),
+      }
+    },
+  })
+  const first = await scheduler.solicit({ id: 'a', prompt: 'a' })
+  assert.equal(scheduler.attachPublishedSegment(first, 'generated-a-1'), true)
+  assert.equal(scheduler.reportPlayback({
+    motionId: 'generated-a-1',
+    phase: 'progress',
+    frameIndex: 3,
+  }), true)
+  // The ARDY bridge restarted; its minted ids are dead on the new process.
+  scheduler.forgetContinuation()
+
+  await scheduler.solicit({ id: 'b', prompt: 'b' })
+  const history = seenHistory[1]
+  assert.ok(history)
+  // Consumed frames survive — the bridge refuses to rehydrate from them, so the
+  // next generation is fresh — but the dead id must be gone.
+  assert.equal(history.continuationId, undefined)
+  assert.equal(history.consumedFrameCount, 3)
+  assert.equal(history.motion.frames.length, 3)
+})
+
+test('forgetContinuation also clears a held prefetch id', async () => {
+  const scheduler = new MotionScheduler({
+    generator: async () => ({
+      motion: makeMotion(5, 50),
+      continuationId: 'bridge-continuation-1',
+    }),
+  })
+  await scheduler.solicit({ id: 'a', prompt: 'a' })
+  await scheduler.prefetch({ id: 'idle.stand', prompt: 'idle stand' })
+  assert.equal(scheduler.prefetchedSegment?.continuationId, 'bridge-continuation-1')
+
+  scheduler.forgetContinuation()
+  assert.equal(scheduler.prefetchedSegment?.continuationId, undefined)
+})
+
 test('clear invalidates the buffer and pending history', async () => {
   const scheduler = new MotionScheduler({ generator: async () => makeMotion(3) })
   await scheduler.solicit(makeIntent())

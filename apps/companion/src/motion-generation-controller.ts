@@ -86,6 +86,15 @@ export class MotionGenerationController {
     return this.#scheduler.buffer
   }
 
+  /**
+   * Tells the scheduler that the ARDY bridge restarted, so any continuation ids
+   * it holds are invalid on the new process and must be forgotten. Called by
+   * the auto-heal path before retrying a degenerate generation.
+   */
+  forgetBackendContinuation(): void {
+    this.#scheduler.forgetContinuation()
+  }
+
   /** Accepts a renderer-observed prefix for the currently published segment. */
   reportPlayback(observation: MotionPlaybackObservation): boolean {
     const accepted = this.#scheduler.reportPlayback(observation)

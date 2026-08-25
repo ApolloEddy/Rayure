@@ -4,6 +4,12 @@ import { validateMotionSemanticFeature } from '@rayure/protocol'
 export interface MotionSemanticFeatureCache {
   readonly size: number
   get(cacheKey: string): MotionSemanticFeature | undefined
+  /**
+   * Finds a feature by its canonical prompt regardless of cacheKey. Callers
+   * with a fresh cacheKey (the calibration wizard sends a new intent id per
+   * request) can still reuse a feature that was cached under a preset id.
+   */
+  findByCanonicalPrompt(prompt: string): MotionSemanticFeature | undefined
   set(feature: MotionSemanticFeature): void
 }
 
@@ -24,6 +30,14 @@ export class MemoryMotionSemanticFeatureCache implements MotionSemanticFeatureCa
 
   get(cacheKey: string): MotionSemanticFeature | undefined {
     return this.#entries.get(requireCacheKey(cacheKey))
+  }
+
+  findByCanonicalPrompt(prompt: string): MotionSemanticFeature | undefined {
+    requireCanonicalPrompt(prompt)
+    for (const feature of this.#entries.values()) {
+      if (feature.canonicalPrompt === prompt) return feature
+    }
+    return undefined
   }
 
   set(feature: MotionSemanticFeature): void {
@@ -83,14 +97,14 @@ export class CachedMotionSemanticFeatureResolver {
   }
 }
 
-function requireCacheKey(value: unknown): string {
+export function requireCacheKey(value: unknown): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/u.test(value)) {
     throw new Error('Motion semantic feature cacheKey is invalid')
   }
   return value
 }
 
-function requireCanonicalPrompt(value: unknown): string {
+export function requireCanonicalPrompt(value: unknown): string {
   if (
     typeof value !== 'string'
     || value.length < 1
