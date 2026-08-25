@@ -9,6 +9,7 @@ const scratchRoot = fileURLToPath(new URL('../../scratch/', import.meta.url))
 const browserPathShim = fileURLToPath(new URL('./src/live2d/path-browser.ts', import.meta.url))
 const browserNodeBuiltinsShim = fileURLToPath(new URL('./src/browser-node-builtins.ts', import.meta.url))
 const sceneArchiveRoot = fileURLToPath(new URL('../../scratch/japanese_room/public-scenes-archive/', import.meta.url))
+const ardyAssetsRoot = fileURLToPath(new URL('../../scratch/ardy3d/', import.meta.url))
 
 const SCENE_ROUTE_PREFIX = '/assets/scenes/'
 
@@ -67,9 +68,67 @@ function privateSceneArchivePlugin(): Plugin {
   }
 }
 
+/**
+ * Dev-only routes for the ARDY 3D debug surface.  The official CoreSkin
+ * mannequin fixture and any opt-in PMX (`?3dModelUrl=`) live outside the app
+ * root (git-ignored), so they are served at fixed machine-independent routes
+ * instead of the wallpaper knowing an absolute `/@fs/` path:
+ *
+ *   /@rayure-assets/<file>   scratch/ardy3d/ (core-skin-data.json, *.pmx)
+ *
+ * Dev-only; the production bundle never references these routes.
+ */
+function rayureDebugAssetsPlugin(): Plugin {
+  return {
+    name: 'rayure-ardy-debug-assets',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const pathname = new URL(req.url ?? '/', 'http://127.0.0.1').pathname
+        if (pathname.startsWith('/@rayure-assets/')) {
+          const fileName = decodeURIComponent(pathname.slice('/@rayure-assets/'.length))
+          if (
+            fileName.length === 0
+            || fileName.includes('/')
+            || fileName.includes('\\')
+            || fileName.includes('\0')
+            || fileName.includes('..')
+          ) {
+            res.statusCode = 400
+            res.end()
+            return
+          }
+          const mimeType = fileName.endsWith('.pmx')
+            ? 'application/octet-stream'
+            : 'application/json; charset=utf-8'
+          serveStatic(res, join(ardyAssetsRoot, fileName), mimeType)
+          return
+        }
+        next()
+      })
+    },
+  }
+}
+
+function serveStatic(res: import('node:http').ServerResponse, path: string, contentType: string): void {
+  let bytes: Buffer
+  try {
+    bytes = readFileSync(path)
+  }
+  catch {
+    res.statusCode = 404
+    res.end()
+    return
+  }
+  res.statusCode = 200
+  res.setHeader('Content-Type', contentType)
+  res.setHeader('Cache-Control', 'no-store')
+  res.end(bytes)
+}
+
 export default defineConfig({
   base: './',
-  plugins: [privateSceneArchivePlugin()],
+  plugins: [privateSceneArchivePlugin(), rayureDebugAssetsPlugin()],
   resolve: {
     alias: {
       path: browserPathShim,
@@ -107,7 +166,9 @@ export default defineConfig({
     port: 4173,
     strictPort: true,
     fs: {
-      allow: [scratchRoot],
+      // app root so dev-only probe pages (e.g. scratch/ardy3d/pmx-bones.html
+      // importing from the app's node_modules) are servable in the dev server.
+      allow: [scratchRoot, fileURLToPath(new URL('.', import.meta.url))],
     },
   },
   preview: {

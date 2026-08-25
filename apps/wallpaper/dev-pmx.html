@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PMX Loadability Check (dev only)</title>
+</head>
+<body>
+<h1>PMX Loadability Check (dev only)</h1>
+<pre id="out" style="white-space: pre-wrap; font: 11px/1.4 Consolas, monospace;">loading…</pre>
+<script type="module">
+  import { ThreeMmdLoader } from '@yohawing/three-mmd-loader/three'
+  const out = document.getElementById('out')
+  const log = (s) => { out.textContent += s + '\n'; console.log('[pmx-check]', s) }
+  // albedo.pmx lives in git-ignored scratch/; reach it through the /@fs/ URL.
+  const url = '/@fs/D:/CodingProjects/Mixed_Language/Rayure/scratch/ardy3d/albedo.pmx'
+  try {
+    log('loader: loading ' + url)
+    const loader = new ThreeMmdLoader()
+    const model = await loader.loadModel(url, { outline: false, materialRenderOrder: false })
+    log('LOADED OK')
+    const bones = []
+    model.root?.traverse(o => { if (o.isBone) bones.push(o.name) })
+    log('bone count: ' + bones.length)
+    const skinned = []
+    model.root?.traverse(o => {
+      if (o.isSkinnedMesh) skinned.push({ name: o.name, bones: o.skeleton?.bones?.length ?? 'n/a' })
+    })
+    log('skinned meshes: ' + JSON.stringify(skinned))
+    log('BONES: ' + JSON.stringify(bones))
+    window.__pmx_check__ = { ok: true, boneCount: bones.length, bones, skinned }
+  } catch (e) {
+    log('ERROR: ' + (e?.stack ?? String(e)))
+    window.__pmx_check__ = { ok: false, error: String(e) }
+  }
+</script>
+</body>
+</html>

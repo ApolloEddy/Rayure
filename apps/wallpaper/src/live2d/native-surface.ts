@@ -514,6 +514,8 @@ export class Live2dNativeSurface implements Live2dParameterSink {
    * Applies the calibrated initial pose. `fadeMs === 0` snaps the model into
    * the pose (used right after load); a positive duration crossfades from the
    * live values so returning to the pose after a motion reads as one move.
+   * Without a calibration pose the model returns to its authored default
+   * parameters instead of freezing on the last generated frame.
    */
   #applyNeutralPose(fadeMs: number): void {
     if (this.#disposed || !this.#modelReady || !this.#model) return
@@ -523,7 +525,10 @@ export class Live2dNativeSurface implements Live2dParameterSink {
         target.set(parameterId, value)
       }
     }
-    if (target.size === 0) return
+    if (target.size === 0) {
+      this.resetParameterDefaults()
+      return
+    }
     if (fadeMs > 0) {
       this.#poseBlend = {
         startedAtMs: performance.now(),

@@ -25,7 +25,26 @@ export interface CalibrationWizardOptions {
   calibrationUrl?: string
   modelId: string
   onSaved?: (calibration: Live2dCalibrationDescriptor) => void
+  /**
+   * Sends an ARDY generation request so the model plays a full motion and the
+   * user can verify the channel mapping visually. Returns a request id, or
+   * false when Companion is unavailable. Absent in tests that stub the wizard.
+   */
+  onRequestMotionGeneration?: (prompt: string) => string | false
 }
+
+/** Preset descriptions must exist verbatim in the local 30011-entry feature
+ *  cache (see motions/motion-features.json) so the companion resolves them
+ *  without a Text Encoder. Anything not in that cache fails when no encoder
+ *  is available, so presets are pinned to real cache entries. */
+const MOTION_VERIFY_PRESETS: readonly { label: string, prompt: string }[] = [
+  { label: '挥手', prompt: 'A person waves their hand casually' },
+  { label: '走路', prompt: 'A person walks forward slowly' },
+  { label: '跑步', prompt: 'A person runs swinging arms vigorously' },
+  { label: '跳舞', prompt: 'A person sweeps both arms in a wide arc from their sides to above their head.' },
+  { label: '下蹲', prompt: 'A person drops to one knee and adjusts the laces or strap on a shoe.' },
+  { label: '跳跃', prompt: 'A person jumps up and down' },
+]
 
 interface MutableRigProfile {
   id: string
@@ -78,6 +97,7 @@ export class CalibrationWizard {
   readonly #calibrationUrl: string | undefined
   readonly #modelId: string
   readonly #onSaved: ((calibration: Live2dCalibrationDescriptor) => void) | undefined
+  readonly #onRequestMotionGeneration: ((prompt: string) => string | false) | undefined
   readonly #state: WizardState
   #root: HTMLElement | undefined
   #toggle: HTMLButtonElement | undefined
@@ -87,6 +107,9 @@ export class CalibrationWizard {
   #pendingChannel: Live2dControl | undefined
   #trialGeneration = 0
   #disposed = false
+  #verifyRequestId: string | undefined
+  #verifyStatus: HTMLElement | undefined
+  #verifyTimeout: number | undefined
 
   constructor(options: CalibrationWizardOptions) {
     this.#surface = options.surface
@@ -94,6 +117,7 @@ export class CalibrationWizard {
     this.#calibrationUrl = options.calibrationUrl
     this.#modelId = options.modelId
     this.#onSaved = options.onSaved
+    this.#onRequestMotionGeneration = options.onRequestMotionGeneration
     this.#state = {
       profile: {
         id: options.baseProfile.id,
@@ -118,6 +142,9 @@ export class CalibrationWizard {
   close(): void {
     if (this.#disposed) return
     this.#disposed = true
+    this.#clearVerifyTimeout()
+    this.#verifyRequestId = undefined
+    this.#verifyStatus = undefined
     this.#root?.remove()
     this.#root = undefined
   }
@@ -559,7 +586,7 @@ export class CalibrationWizard {
     intro.style.cssText = 'font-size:12px;color:#a1a1aa;'
     intro.textContent = '调整参数把模型摆成你想要的初始姿势（如站立、双手放下），然后「捕获当前姿势」。动作结束会回到这个姿势。'
     wrap.append(intro)
-
+    wrap.append(this.#buildMotionVerifyBlock())
     const buttons = document.createElement('div')
     buttons.style.cssText = 'display:flex;gap:8px;'
     buttons.append(
@@ -595,6 +622,110 @@ export class CalibrationWizard {
       wrap.append(this.#buildPoseSlider(binding))
     }
     return wrap
+  }
+
+  #buildMotionVerifyBlock(): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.style.cssText = 'display:flex;flex-direction:column;gap:8px;background:#1f2027;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;'
+    const title = document.createElement('div')
+    title.style.cssText = 'font-weight:600;font-size:13px;'
+    title.textContent = 'ARDY 动作验证（检查映射是否正确）'
+    const hint = document.createElement('div')
+    hint.style.cssText = 'font-size:12px;color:#a1a1aa;'
+    hint.textContent = '点一个动作让 ARDY 生成并播放到模型上，肉眼看姿势是否符合描述。预置动作已在本地特征库中，首次生成约 10–60 秒，再次点击立即播放；自由输入仅当该描述已在库中（或无 Text Encoder 时）才能生成。播放结束模型回到初始姿势。'
+    const presets = document.createElement('div')
+    presets.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;'
+    for (const preset of MOTION_VERIFY_PRESETS) {
+      presets.append(button(preset.label, () => {
+        this.#requestMotionVerify(preset.prompt, status)
+      }))
+    }
+    const row = document.createElement('div')
+    row.style.cssText = 'display:flex;gap:6px;'
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.maxLength = 512
+    input.placeholder = '或输入动作描述，如：A person claps their hands'
+    input.style.cssText = 'flex:1;min-width:0;background:#26262e;border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:6px 8px;color:#e4e4e7;font-size:12px;'
+    row.append(input, button('生成并播放', () => {
+      const prompt = input.value.trim()
+      if (prompt.length === 0) {
+        status.textContent = '请输入动作描述'
+        return
+      }
+      this.#requestMotionVerify(prompt, status)
+    }))
+    const status = document.createElement('div')
+    status.style.cssText = 'font-size:12px;color:#a1a1aa;min-height:16px;'
+    status.textContent = this.#onRequestMotionGeneration === undefined
+      ? 'Companion 不可用（无法生成动作）'
+      : '等待发送'
+    wrap.append(title, hint, presets, row, status)
+    return wrap
+  }
+
+  #requestMotionVerify(prompt: string, status: HTMLElement): void {
+    if (this.#onRequestMotionGeneration === undefined) {
+      status.textContent = 'Companion 不可用（无法生成动作）'
+      return
+    }
+    this.#clearVerifyTimeout()
+    this.#verifyStatus = status
+    this.#verifyRequestId = undefined
+    const result = this.#onRequestMotionGeneration(prompt)
+    if (result === false) {
+      this.#verifyStatus = undefined
+      status.textContent = '请求失败：Companion 未连接'
+      return
+    }
+    this.#verifyRequestId = result
+    status.textContent = '请求已发送 · ARDY 正在生成（通常 10–60 秒，相同动作二次请求即刻播放）…'
+    this.#verifyTimeout = window.setTimeout(() => {
+      if (this.#verifyStatus !== undefined) {
+        this.#verifyStatus.textContent = '生成超时：请查看 Companion 窗口的 motion.generate.error 日志'
+      }
+      this.#verifyRequestId = undefined
+      this.#verifyStatus = undefined
+      this.#verifyTimeout = undefined
+    }, 75_000)
+  }
+
+  #clearVerifyTimeout(): void {
+    if (this.#verifyTimeout !== undefined) {
+      window.clearTimeout(this.#verifyTimeout)
+      this.#verifyTimeout = undefined
+    }
+  }
+
+  /**
+   * Reflects a companion motion.generate.status event into the verify block.
+   * The companion client receives these on every intent, so the request id is
+   * matched against the wizard's pending request before showing anything.
+   */
+  reportMotionGenerateStatus(status: { requestId: string, phase: 'accepted' | 'failed', message?: string }): void {
+    if (this.#verifyRequestId === undefined || status.requestId !== this.#verifyRequestId) return
+    if (status.phase === 'failed') {
+      this.#clearVerifyTimeout()
+      if (this.#verifyStatus !== undefined) {
+        this.#verifyStatus.textContent = `生成失败：${status.message ?? '未知错误'}（请查看 Companion 日志）`
+      }
+      this.#verifyRequestId = undefined
+      this.#verifyStatus = undefined
+    }
+    else if (this.#verifyStatus !== undefined) {
+      this.#verifyStatus.textContent = 'ARDY 正在生成动作…（10–60 秒，生成后自动播放）'
+    }
+  }
+
+  /** Reflects a companion motion.published event into the verify block. */
+  reportMotionPublished(displayName: string): void {
+    if (this.#verifyRequestId === undefined) return
+    this.#clearVerifyTimeout()
+    if (this.#verifyStatus !== undefined) {
+      this.#verifyStatus.textContent = `✓ 动作已生成并开始播放（${displayName}）· 播放结束模型回到初始姿势`
+    }
+    this.#verifyRequestId = undefined
+    this.#verifyStatus = undefined
   }
 
   #buildPoseSlider(binding: Live2dParameterBinding): HTMLElement {

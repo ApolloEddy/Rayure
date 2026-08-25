@@ -23,6 +23,8 @@ import {
 import type { Live2dNativeSnapshot } from './live2d/native-surface.ts'
 import { resolveLive2dCoreUrl } from './live2d/core-source.ts'
 import { buildCalibratedRigProfile, calibrationNeutralPose, resolveLive2dRigProfile } from './live2d/rig-profile.ts'
+import { Ardy3dDebugSurface } from './ardy3d/three-js-debug-surface.ts'
+import type { Ardy3dDebugSnapshot } from './ardy3d/three-js-debug-surface.ts'
 import { missingCalibrationControls } from './live2d/calibration-core.ts'
 import { CalibrationWizard } from './live2d/calibration-wizard.ts'
 import type { WallpaperPropertyListener } from './wallpaper-api.ts'
@@ -48,13 +50,30 @@ const nativeContentQuery = debugQuery.get('live2dNativeContent')
 let live2dNativeContentEnabled = nativeContentQuery === '1'
 let live2dNativeSceneVisible = debugQuery.get('live2dNativeScene') === '1'
 let live2dDebugBackdropVisible = debugQuery.get('backdrop') === '1'
-const live2dDiagnosticsPanel = createLive2dDiagnosticsPanel(live2dParameterProbeEnabled || live2dNativeModelUrl !== undefined)
+// ARDY 3D debug surface: `?3dDebug=1` fills the stage with a WebGL view driving
+// the same generated Canonical Motion on the official ARDY CoreSkin mannequin
+// (an alternative PMX only loads through an explicit `?3dModelUrl=`).
+const ardy3dDebugEnabled = debugQuery.get('3dDebug') === '1'
+const ardy3dModelUrlOverride = parseLocal3dDebugUrl(debugQuery.get('3dModelUrl'))
+// 3D debug is a dedicated view: the 3D surface fills the stage and the
+// diagnostics panel docks to the left so neither covers the rig.  The attribute
+// name is set explicitly (not via `dataset.rayure3dDebug`, which would yield
+// `data-rayure3d-debug` and mismatch the CSS selector below).
+if (ardy3dDebugEnabled) document.body.setAttribute('data-rayure-3d-debug', '1')
+const live2dDiagnosticsPanel = createLive2dDiagnosticsPanel(
+  live2dParameterProbeEnabled || live2dNativeModelUrl !== undefined || ardy3dDebugEnabled,
+)
 
 declare global {
   interface Window {
     __rayure_scene__?: RayureScene
+    __rayure_live2d_surface__?: Live2dNativeSurface
+    __rayure_3d_surface__?: Ardy3dDebugSurface
   }
 }
+
+let ardy3dSurface: Ardy3dDebugSurface | undefined
+let ardy3dSurfaceModelUrl: string | undefined = ardy3dModelUrlOverride
 
 const queryPort = parsePort(new URLSearchParams(window.location.search).get('port'))
 let companionPort = queryPort ?? DEFAULT_WALLPAPER_SETTINGS.companionPort
@@ -69,7 +88,7 @@ window.__rayure_scene__ = scene
 // The developer panel can opt the private backdrop back in when inspecting it.
 scene.setEnvironmentVisible(live2dDebugBackdropVisible)
 
-const live2dQuerySurface = live2dNativeModelUrl === undefined
+const live2dQuerySurface = live2dNativeModelUrl === undefined || ardy3dDebugEnabled
   ? undefined
   : new Live2dNativeSurface(stage, {
     modelUrl: live2dNativeModelUrl,
@@ -83,6 +102,7 @@ const live2dQuerySurface = live2dNativeModelUrl === undefined
     },
   })
 let live2dCompanionSurface: Live2dNativeSurface | undefined
+let calibrationWizard: CalibrationWizard | undefined
 let live2dCompanionGeneration = 0
 let live2dCompanionModel: ModelDescriptor | undefined
 let live2dCompanionMotionCatalog: readonly Live2dMotionDescriptor[] = []
@@ -100,6 +120,7 @@ let speechPlayer: SpeechPlayer | undefined
 void live2dQuerySurface?.start().then((loaded) => {
   if (loaded && live2dQuerySurface !== undefined) applyPendingLive2dExpression(live2dQuerySurface)
 })
+void maybeStartArdy3dSurface()
 
 const companion = new CompanionClient({
   port: companionPort,
@@ -115,9 +136,11 @@ const companion = new CompanionClient({
     scene.updateMotionCatalog(motions.filter(motion => motion.format === 'vmd'))
   },
   onMotionPublished: (motion) => {
+    calibrationWizard?.reportMotionPublished(motion.displayName)
     void handleMotionPublished(motion)
   },
   onMotionGenerateStatus: (status) => {
+    calibrationWizard?.reportMotionGenerateStatus(status)
     live2dDiagnosticsPanel.generationStatus.textContent = status.phase === 'accepted'
       ? `request ${status.requestId} accepted · waiting for motion.published`
       : `request ${status.requestId} failed · ${status.message ?? 'unknown error'}`
@@ -244,10 +267,19 @@ window.addEventListener('beforeunload', () => {
   live2dCompanionGeneration += 1
   live2dQuerySurface?.dispose()
   live2dCompanionSurface?.dispose()
+  ardy3dSurface?.dispose()
+  ardy3dSurface = undefined
   scene.dispose()
 }, { once: true })
 
 async function handleModelAvailable(model: ModelDescriptor): Promise<void> {
+  if (ardy3dDebugEnabled) {
+    // 3D debug is the sole view: the Companion's character (Live2D or the
+    // frozen MMD baseline) stays off the main stage so only the 3D surface
+    // renders, and generated motions are never grafted onto the L2D rig.
+    renderLive2dModelStatus('ready', model, '3D debug: character surface suppressed')
+    return
+  }
   if (model.format === 'pmx') {
     live2dCompanionGeneration += 1
     motionPublishedGeneration += 1
@@ -309,6 +341,9 @@ async function loadLive2dCompanionSurface(model: ModelDescriptor): Promise<void>
     },
   })
   live2dCompanionSurface = surface
+  // Debug hook mirroring __rayure_scene__: lets Playwright E2E read every
+  // parameter the generated motion drives, beyond the 6-entry diagnostics slice.
+  window.__rayure_live2d_surface__ = surface
   applyLive2dNativeContentPolicy()
   const loaded = await surface.start()
   if (generation !== live2dCompanionGeneration) return
@@ -362,7 +397,9 @@ function maybeOpenCalibrationWizard(
     onSaved: () => {
       localStorage.setItem(`rayure-calibrated-${model.id}`, '1')
     },
+    onRequestMotionGeneration: prompt => companion.requestMotionGeneration({ prompt }),
   })
+  calibrationWizard = wizard
   wizard.open()
 }
 
@@ -425,35 +462,76 @@ function requestLive2dMotion(motion: Live2dMotionDescriptor): void {
 async function handleMotionPublished(motion: MotionDescriptor): Promise<void> {
   if (motion.format !== 'canonical') return
   latestGeneratedMotion = motion
+  const generation = ++motionPublishedGeneration
   renderLive2dGeneratedMotion(motion, 'announced')
-  if (live2dCompanionModel?.format !== 'live2d') {
+  renderArdy3dGeneratedMotion(motion, 'announced')
+
+  // In 3D debug the rig is the sole consumer: the motion is never grafted onto
+  // a Live2D character (none is loaded in that view).
+  if (ardy3dDebugEnabled) {
+    const surface = ardy3dSurface
+    if (surface === undefined || !surface.isReady) {
+      renderArdy3dGeneratedMotion(motion, surface === undefined ? '3D surface disabled' : 'queued until 3D is ready')
+      return
+    }
+    let canonical: CanonicalMotion
+    try {
+      canonical = await loadCanonicalMotion(motion.url)
+    }
+    catch {
+      if (generation === motionPublishedGeneration) renderArdy3dGeneratedMotion(motion, 'failed to load canonical frames')
+      return
+    }
+    if (generation !== motionPublishedGeneration) return
+    const started = surface.playGeneratedMotion(canonical, motion)
+    renderArdy3dGeneratedMotion(motion, started ? 'playing' : 'rejected by 3D surface')
+    return
+  }
+
+  // Side-by-side path: the 3D debug surface consumes whatever arrives while the
+  // Live2D surface queues until its model is ready.
+  const ardy3dReady = ardy3dSurface?.isReady === true
+  if (!ardy3dReady) {
+    renderArdy3dGeneratedMotion(motion, ardy3dSurface === undefined ? '3D surface disabled' : 'queued until 3D is ready')
+  }
+
+  const live2dSurface = live2dCompanionModel?.format === 'live2d' ? live2dCompanionSurface : undefined
+  if (live2dSurface === undefined) {
     pendingCanonicalMotion = motion
     renderLive2dGeneratedMotion(motion, 'waiting for Live2D model')
-    return
   }
-  const surface = live2dCompanionSurface
-  if (surface === undefined || !surface.isReady) {
+  else if (!live2dSurface.isReady) {
     pendingCanonicalMotion = motion
     renderLive2dGeneratedMotion(motion, 'queued until Live2D is ready')
-    return
   }
-  pendingCanonicalMotion = undefined
-  const generation = ++motionPublishedGeneration
-  renderLive2dGeneratedMotion(motion, 'loading canonical frames')
+  else {
+    pendingCanonicalMotion = undefined
+    renderLive2dGeneratedMotion(motion, 'loading canonical frames')
+  }
+
   let canonical: CanonicalMotion
   try {
     canonical = await loadCanonicalMotion(motion.url)
   }
   catch {
-    if (generation === motionPublishedGeneration && surface === live2dCompanionSurface) {
-      surface.stopGeneratedMotion()
+    if (generation === motionPublishedGeneration) {
+      live2dSurface?.stopGeneratedMotion()
       renderLive2dGeneratedMotion(motion, 'failed to load canonical frames')
+      renderArdy3dGeneratedMotion(motion, 'failed to load canonical frames')
     }
     return
   }
-  if (generation !== motionPublishedGeneration || surface !== live2dCompanionSurface) return
-  const started = surface.playGeneratedMotion(canonical, motion)
-  renderLive2dGeneratedMotion(motion, started ? 'playing' : 'rejected by Live2D surface')
+  if (generation !== motionPublishedGeneration) return
+
+  if (ardy3dSurface?.isReady === true) {
+    const started = ardy3dSurface.playGeneratedMotion(canonical, motion)
+    renderArdy3dGeneratedMotion(motion, started ? 'playing' : 'rejected by 3D surface')
+  }
+
+  if (live2dSurface?.isReady === true) {
+    const started = live2dSurface.playGeneratedMotion(canonical, motion)
+    renderLive2dGeneratedMotion(motion, started ? 'playing' : 'rejected by Live2D surface')
+  }
 }
 
 async function handleSpeechPublished(speech: SpeechDescriptor): Promise<void> {
@@ -612,6 +690,7 @@ interface Live2dDiagnosticsPanel {
   generationPrompt: HTMLInputElement
   generationButton: HTMLButtonElement
   generationStatus: HTMLElement
+  ardy3d: HTMLElement
 }
 
 function createLive2dDiagnosticsPanel(visible: boolean): Live2dDiagnosticsPanel {
@@ -734,6 +813,12 @@ function createLive2dDiagnosticsPanel(visible: boolean): Live2dDiagnosticsPanel 
     if (motion?.format === 'canonical') void handleMotionPublished(motion)
   })
   replayGeneratedButton.disabled = true
+  const ardy3dLabel = document.createElement('span')
+  ardy3dLabel.className = 'live2d-diagnostics-label'
+  ardy3dLabel.textContent = 'ARDY 3D surface（?3dDebug=1 启用）：'
+  const ardy3d = document.createElement('code')
+  ardy3d.className = 'live2d-diagnostics-expressions-list'
+  ardy3d.textContent = '3D surface: disabled'
   const motionLabel = document.createElement('span')
   motionLabel.className = 'live2d-diagnostics-label'
   motionLabel.textContent = 'Live2D 原生动作（岛风 model3 内置）：'
@@ -757,6 +842,8 @@ function createLive2dDiagnosticsPanel(visible: boolean): Live2dDiagnosticsPanel 
     generatedLabel,
     generated,
     replayGeneratedButton,
+    ardy3dLabel,
+    ardy3d,
     motionLabel,
     motions,
   )
@@ -773,6 +860,7 @@ function createLive2dDiagnosticsPanel(visible: boolean): Live2dDiagnosticsPanel 
     generationPrompt,
     generationButton,
     generationStatus,
+    ardy3d,
   }
 }
 
@@ -855,9 +943,91 @@ function renderLive2dGeneratedMotionPlayback(observation: {
   renderLive2dGeneratedMotion(latestGeneratedMotion, state)
 }
 
+function renderArdy3dSnapshot(snapshot: Ardy3dDebugSnapshot): void {
+  const text = snapshot.modelLoaded
+    ? `${snapshot.modelKind} · ${snapshot.boneCount} bones · ${snapshot.resolvedJointCount}/27 joints · ×${snapshot.positionScale}`
+    : `unavailable · ${snapshot.detail ?? 'loading'}`
+  live2dDiagnosticsPanel.ardy3d.textContent = `3D surface: ${text}`
+  if (ardy3dDebugEnabled) {
+    modelLabel.dataset.state = snapshot.modelLoaded ? 'ready' : 'error'
+    modelLabel.textContent = snapshot.modelLoaded ? snapshot.modelName : '3D model unavailable'
+    modelLabel.title = snapshot.detail ?? ''
+  }
+}
+
+function renderArdy3dGeneratedMotion(motion: MotionDescriptor | undefined, state: string): void {
+  if (motion === undefined || motion.format !== 'canonical') {
+    live2dDiagnosticsPanel.ardy3d.textContent = '3D surface: waiting for ARDY'
+    return
+  }
+  live2dDiagnosticsPanel.ardy3d.textContent = `3D surface: ${motion.displayName} · ${motion.id} · ${state}`
+}
+
+function renderArdy3dGeneratedMotionPlayback(observation: {
+  motionId: string
+  phase: 'started' | 'progress' | 'completed' | 'cancelled'
+  frameIndex: number
+}): void {
+  if (latestGeneratedMotion?.format !== 'canonical' || latestGeneratedMotion.id !== observation.motionId) return
+  const state = observation.phase === 'started'
+    ? 'playing'
+    : observation.phase === 'progress'
+      ? `playing frame ${observation.frameIndex}`
+      : observation.phase
+  renderArdy3dGeneratedMotion(latestGeneratedMotion, state)
+}
+
+async function maybeStartArdy3dSurface(): Promise<void> {
+  if (!ardy3dDebugEnabled || ardy3dSurface !== undefined) return
+  const modelUrl = resolveArdy3dModelUrl()
+  const surface = new Ardy3dDebugSurface(stage, {
+    ...(modelUrl === undefined ? {} : { modelUrl }),
+    onSnapshot: renderArdy3dSnapshot,
+    onGeneratedMotionPlayback: observation => {
+      companion.reportMotionPlayback(observation)
+      renderArdy3dGeneratedMotionPlayback(observation)
+    },
+  })
+  ardy3dSurface = surface
+  window.__rayure_3d_surface__ = surface
+  const loaded = await surface.start()
+  if (!loaded) {
+    ardy3dSurface = undefined
+    delete window.__rayure_3d_surface__
+  }
+  else {
+    renderArdy3dSnapshot(surface.snapshot())
+    // Replay a motion that was announced while the surface was still loading
+    // (e.g. Companion's startup generation finishing first).
+    if (latestGeneratedMotion?.format === 'canonical') void handleMotionPublished(latestGeneratedMotion)
+  }
+}
+
+/**
+ * Resolves the dev-only 3D model source.  The 3D debug view exists to verify
+ * ARDY canonical motion on the official fixture, so it defaults to the CoreSkin
+ * mannequin — the ARDY CoreSkeleton27 rig in its native meter space (no unit
+ * conversion, no broken bone mapping).  An alternative PMX loads only through
+ * an explicit `?3dModelUrl=` opt-in (`core-skin` keeps the mannequin); the
+ * surface treats `undefined` as "load the CoreSkin mannequin".
+ */
+function resolveArdy3dModelUrl(): string | undefined {
+  return ardy3dSurfaceModelUrl === 'core-skin' ? undefined : ardy3dSurfaceModelUrl
+}
+
 function parseLocalLive2dDebugUrl(value: string | null): string | undefined {
   if (value === null || value.trim() !== value || value.length === 0 || value.length > 2048) return undefined
   if (value.startsWith('/@fs/') || /^https?:\/\/127\.0\.0\.1(?::\d{1,5})?\//u.test(value)) return value
+  return undefined
+}
+
+function parseLocal3dDebugUrl(value: string | null): string | undefined {
+  if (value === null || value.trim() !== value || value.length === 0 || value.length > 4096) return undefined
+  // `core-skin` keeps the default ARDY mannequin; any other URL loads that PMX
+  // in its place, so the two rigs are debuggable side by side on demand.
+  if (value === 'core-skin') return value
+  if (value.startsWith('/@fs/') || value.startsWith('/@rayure-assets/')) return value
+  if (/^https?:\/\/127\.0\.0\.1(?::\d{1,5})?\//u.test(value)) return value
   return undefined
 }
 
