@@ -22,16 +22,16 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
 import { CanonicalMotionPlayer } from '../live2d/canonical-motion-client.ts'
 import type { Live2dParameterSink } from '../live2d/rig-profile.ts'
-import { disposeMmdModel } from '../mmd-model-host.ts'
+import { disposeThreeObjectResources } from '../three-resource-disposal.ts'
 import { CanonicalMotionRigAdapter } from './canonical-rig-adapter.ts'
 import { loadCoreSkinModel } from './core-skin-loader.ts'
 import type { CoreSkinModel } from './core-skin-loader.ts'
 import { detectRigPositionScale, scaleCanonicalFrame } from './rig-scale.ts'
 
 /**
- * Dev-only route served by the Vite config plugin; see vite.config.ts
- * `rayureLocalAssetPlugin()`.  Kept machine-independent so the debug surface
- * and the Playwright E2E never embed an absolute path into source.
+ * Local debug route served by the Vite dev/preview plugin; see vite.config.ts.
+ * Kept machine-independent so the debug surface and visual preflight never
+ * embed an absolute path into source or the production entry chunk.
  */
 export const DEFAULT_CORE_SKIN_URL = '/@rayure-assets/core-skin-data.json'
 
@@ -386,9 +386,7 @@ export class Ardy3dDebugSurface implements Live2dParameterSink {
     this.#renderer = undefined
     if (this.#modelRoot !== undefined) {
       try {
-        // disposeMmdModel only reads `root` and `runtime`; the loader's runtime
-        // is never started on this surface, so an empty runtime is a no-op.
-        disposeMmdModel({ root: this.#modelRoot, runtime: {} } as unknown as import('../mmd-model-host.ts').LoadableMmdModel)
+        disposeThreeObjectResources(this.#modelRoot)
       }
       catch {
         // A partially-loaded model may not expose all GPU resources yet.

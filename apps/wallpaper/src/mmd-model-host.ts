@@ -4,10 +4,8 @@ import {
   Bone,
   Box3,
   Group,
-  Material,
   Mesh,
   SkinnedMesh,
-  Texture,
   Vector3,
 } from 'three'
 
@@ -18,6 +16,7 @@ import type { MmdMotionLoaderLike } from './motion-controller.ts'
 import { EmoteController } from './emote-controller.ts'
 import type { PlayEmoteOptions } from './emote-controller.ts'
 import { remapModelBones } from './bone-remapper.ts'
+import { disposeThreeObjectResources } from './three-resource-disposal.ts'
 
 export interface LoadableMmdModel {
   readonly root: Group
@@ -380,7 +379,6 @@ function disposeActiveModel(active: ActiveModel): void {
 }
 
 export function disposeMmdModel(model: LoadableMmdModel): void {
-  model.root.removeFromParent()
   try {
     if (typeof model.runtime.dispose === 'function') model.runtime.dispose()
     else model.runtime.clearAnimation?.()
@@ -389,30 +387,7 @@ export function disposeMmdModel(model: LoadableMmdModel): void {
     // Continue releasing GPU resources even if runtime disposal reports an error.
   }
 
-  const geometries = new Set<{ dispose(): void }>()
-  const materials = new Set<Material>()
-  const textures = new Set<Texture>()
-  const skeletons = new Set<{ dispose(): void }>()
-  model.root.traverse((node) => {
-    if (node instanceof Mesh) {
-      geometries.add(node.geometry)
-      const nodeMaterials = Array.isArray(node.material) ? node.material : [node.material]
-      for (const material of nodeMaterials) {
-        materials.add(material)
-        for (const value of Object.values(material)) {
-          if (value instanceof Texture && value.userData.mmdTextureOwnership === 'loader') {
-            textures.add(value)
-          }
-        }
-      }
-    }
-    if (node instanceof SkinnedMesh) skeletons.add(node.skeleton)
-  })
-  for (const skeleton of skeletons) skeleton.dispose()
-  for (const geometry of geometries) geometry.dispose()
-  for (const material of materials) material.dispose()
-  for (const texture of textures) texture.dispose()
-  model.root.clear()
+  disposeThreeObjectResources(model.root)
 }
 
 function modelKey(descriptor: ModelDescriptor): string {

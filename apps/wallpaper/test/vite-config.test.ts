@@ -17,3 +17,16 @@ test('Vite filesystem gateway stays confined to the wallpaper app', () => {
   assert.equal(allow.length, 1)
   assert.equal(allow.some(path => /[\\/]scratch[\\/]/iu.test(path)), false)
 })
+
+test('local private asset routes are installed for both dev and built preview', () => {
+  const plugins = (viteConfig.plugins ?? []) as unknown as readonly {
+    name?: string
+    configureServer?: unknown
+    configurePreviewServer?: unknown
+  }[]
+  for (const name of ['rayure-private-scene-archive', 'rayure-ardy-debug-assets']) {
+    const plugin = plugins.find(candidate => candidate.name === name)
+    assert.equal(typeof plugin?.configureServer, 'function')
+    assert.equal(typeof plugin?.configurePreviewServer, 'function')
+  }
+})

@@ -153,16 +153,26 @@ try {
         }
     }
 
-    $developmentOnlyRuntimeMarkers = @(
+    $explicitDebugRuntimeMarkers = @(
         'PMX model exposes no skinned mesh to drive',
         'Core skin fetch failed with HTTP'
     )
-    foreach ($artifact in ($textArtifacts | Where-Object { $_.Extension -eq '.js' })) {
-        $artifactContent = Get-Content -Raw -LiteralPath $artifact.FullName
-        foreach ($marker in $developmentOnlyRuntimeMarkers) {
-            if ($artifactContent.Contains($marker)) {
-                throw "Development-only 3D debug runtime entered the wallpaper build: $marker in $($artifact.FullName)"
-            }
+    $entryScripts = @(Get-ChildItem -LiteralPath (Join-Path $distRoot 'assets') -File -Filter 'index-*.js')
+    if ($entryScripts.Count -ne 1) {
+        throw "Expected exactly one wallpaper entry script, found $($entryScripts.Count)"
+    }
+    $entryContent = Get-Content -Raw -LiteralPath $entryScripts[0].FullName
+    foreach ($marker in $explicitDebugRuntimeMarkers) {
+        if ($entryContent.Contains($marker)) {
+            throw "Explicit 3D debug runtime entered the ordinary wallpaper entry: $marker"
+        }
+    }
+    $debugChunkContent = ($textArtifacts |
+        Where-Object { $_.Extension -eq '.js' -and $_.FullName -ne $entryScripts[0].FullName } |
+        ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName }) -join "`n"
+    foreach ($marker in $explicitDebugRuntimeMarkers) {
+        if (-not $debugChunkContent.Contains($marker)) {
+            throw "Explicit 3D debug runtime is missing from the lazy build chunks: $marker"
         }
     }
 

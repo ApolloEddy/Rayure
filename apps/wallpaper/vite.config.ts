@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { defineConfig } from 'vite'
-import type { Plugin } from 'vite'
+import type { Connect, Plugin } from 'vite'
 
 const browserPathShim = fileURLToPath(new URL('./src/live2d/path-browser.ts', import.meta.url))
 const browserNodeBuiltinsShim = fileURLToPath(new URL('./src/browser-node-builtins.ts', import.meta.url))
@@ -21,92 +21,94 @@ const MIME_TYPES_BY_EXTENSION: Record<string, string> = {
 
 /**
  * Serves the private Japanese-room backdrop from the scratch archive during
- * `vite dev` only. The file must stay untracked and must never enter the
+ * local Vite dev/preview only. The file must stay untracked and never enter the
  * wallpaper build, so it cannot live in `public/` — the verify audit blocks
  * `assets/scenes` in dist and git tracks nothing under scratch.
  */
 function privateSceneArchivePlugin(): Plugin {
+  const install = (middlewares: Connect.Server): void => {
+    middlewares.use((req, res, next) => {
+      const pathname = new URL(req.url ?? '/', 'http://127.0.0.1').pathname
+      if (!pathname.startsWith(SCENE_ROUTE_PREFIX)) {
+        next()
+        return
+      }
+      const fileName = decodeSingleFileName(pathname.slice(SCENE_ROUTE_PREFIX.length))
+      if (fileName === undefined) {
+        res.statusCode = 400
+        res.end()
+        return
+      }
+      const extension = fileName.slice(fileName.lastIndexOf('.')).toLowerCase()
+      const mimeType = MIME_TYPES_BY_EXTENSION[extension]
+      if (mimeType === undefined) {
+        res.statusCode = 404
+        res.end()
+        return
+      }
+      serveStatic(res, join(sceneArchiveRoot, fileName), mimeType)
+    })
+  }
   return {
     name: 'rayure-private-scene-archive',
     apply: 'serve',
     configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        const pathname = new URL(req.url ?? '/', 'http://127.0.0.1').pathname
-        if (!pathname.startsWith(SCENE_ROUTE_PREFIX)) {
-          next()
-          return
-        }
-        const fileName = decodeSingleFileName(pathname.slice(SCENE_ROUTE_PREFIX.length))
-        if (fileName === undefined) {
-          res.statusCode = 400
-          res.end()
-          return
-        }
-        const extension = fileName.slice(fileName.lastIndexOf('.')).toLowerCase()
-        const mimeType = MIME_TYPES_BY_EXTENSION[extension]
-        if (mimeType === undefined) {
-          res.statusCode = 404
-          res.end()
-          return
-        }
-        let bytes: Buffer
-        try {
-          bytes = readFileSync(join(sceneArchiveRoot, fileName))
-        }
-        catch {
-          res.statusCode = 404
-          res.end()
-          return
-        }
-        res.statusCode = 200
-        res.setHeader('Content-Type', mimeType)
-        res.setHeader('Cache-Control', 'no-store')
-        res.end(bytes)
-      })
+      install(server.middlewares)
+    },
+    configurePreviewServer(server) {
+      install(server.middlewares)
     },
   }
 }
 
 /**
- * Dev-only routes for the ARDY 3D debug surface.  The official CoreSkin
+ * Local-only routes for the ARDY 3D debug surface. The official CoreSkin
  * mannequin fixture and any opt-in PMX (`?3dModelUrl=`) live outside the app
  * root (git-ignored), so they are served at fixed machine-independent routes
  * instead of the wallpaper knowing an absolute `/@fs/` path:
  *
  *   /@rayure-assets/<file>   scratch/ardy3d/ (core-skin-data.json, *.pmx)
  *
- * Dev-only; the production bundle never references these routes.
+ * The explicit `?3dDebug=1` lazy chunk references these routes, but the private
+ * files are never copied into dist and ordinary wallpaper startup never fetches
+ * the chunk or route.
  */
 function rayureDebugAssetsPlugin(): Plugin {
+  const install = (middlewares: Connect.Server): void => {
+    middlewares.use((req, res, next) => {
+      const pathname = new URL(req.url ?? '/', 'http://127.0.0.1').pathname
+      if (!pathname.startsWith('/@rayure-assets/')) {
+        next()
+        return
+      }
+      const fileName = decodeSingleFileName(pathname.slice('/@rayure-assets/'.length))
+      if (fileName === undefined) {
+        res.statusCode = 400
+        res.end()
+        return
+      }
+      const extension = fileName.slice(fileName.lastIndexOf('.')).toLowerCase()
+      const mimeType = extension === '.pmx'
+        ? 'application/octet-stream'
+        : extension === '.json'
+          ? 'application/json; charset=utf-8'
+          : undefined
+      if (mimeType === undefined) {
+        res.statusCode = 404
+        res.end()
+        return
+      }
+      serveStatic(res, join(ardyAssetsRoot, fileName), mimeType)
+    })
+  }
   return {
     name: 'rayure-ardy-debug-assets',
     apply: 'serve',
     configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        const pathname = new URL(req.url ?? '/', 'http://127.0.0.1').pathname
-        if (pathname.startsWith('/@rayure-assets/')) {
-          const fileName = decodeSingleFileName(pathname.slice('/@rayure-assets/'.length))
-          if (fileName === undefined) {
-            res.statusCode = 400
-            res.end()
-            return
-          }
-          const extension = fileName.slice(fileName.lastIndexOf('.')).toLowerCase()
-          const mimeType = extension === '.pmx'
-            ? 'application/octet-stream'
-            : extension === '.json'
-              ? 'application/json; charset=utf-8'
-              : undefined
-          if (mimeType === undefined) {
-            res.statusCode = 404
-            res.end()
-            return
-          }
-          serveStatic(res, join(ardyAssetsRoot, fileName), mimeType)
-          return
-        }
-        next()
-      })
+      install(server.middlewares)
+    },
+    configurePreviewServer(server) {
+      install(server.middlewares)
     },
   }
 }

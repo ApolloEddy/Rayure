@@ -8,6 +8,7 @@
 
 #### 修复
 
+- 修复恢复性审计把 `?3dDebug=1` 错误限制为 `import.meta.env.DEV`、导致 `vite preview`/构建调试页只剩巨大环境占位体而没有模型的问题；显式调试查询现在在构建页恢复独立懒加载，4174 preview 同样通过窄白名单路由读取本机 CoreSkin 夹具；
 - 修复首次标定没有 `calibrationUrl`、实际上无法保存的问题：Companion 现在为已配置本地状态路径的 Live2D 模型始终发布固定的 tokenized 校准端点，文件不存在时 GET 返回 404，POST 成功后立即可读；
 - 修复标定向导忽略 POST 状态却提前关闭并写入浏览器“已保存”标记的问题：只有 Companion 返回成功才关闭向导并重新加载模型，HTTP/网络失败会留在当前步骤显示错误，连击由保存状态隔离；
 - 修复手工选择参数后把模型真实范围丢弃、统一写成 `-30..30 / neutral=0` 的问题；映射现在保留模型给出的 min/max/default，并拒绝非有限、倒置、重复或越界范围；
@@ -19,13 +20,13 @@
 #### 架构边界
 
 - 校准数据从模型目录迁移到每用户 Rayure 状态目录（Windows 默认 `%LOCALAPPDATA%\Rayure\calibrations`）；模型旁旧 `rayure.calibration.json` 仅兼容读取，新保存不再修改私有/购买模型目录；写入采用同目录临时文件原子替换；
-- ARDY 3D/CoreSkin/PMX 调试表面改为仅在 Vite 开发环境动态导入，不再静态进入 Wallpaper 生产包；Vite `/@fs/` 不再开放整个 `scratch`，调试资产只允许固定单文件路由与 `.json`/`.pmx` 白名单；
-- `scripts/verify.ps1` 新增开发期 3D 运行时代码不得进入 `dist` 的产物门禁。
+- ARDY 3D/CoreSkin/PMX 调试表面改为显式 `?3dDebug=1` 才加载的独立分块，不再静态进入普通 Wallpaper 入口；Vite `/@fs/` 不再开放整个 `scratch`，dev/preview 调试资产只允许固定单文件路由与 `.json`/`.pmx` 白名单；
+- `scripts/verify.ps1` 新增 3D 调试代码必须保留在独立懒加载分块、不得进入普通入口的双向产物门禁。
 
 #### 验证
 
-- `scripts/verify.ps1 -SkipInstall` 通过：Protocol 26、Companion 148、Wallpaper 91，共 265 项测试全绿；TypeScript 检查、Python Bridge 编译、Wallpaper 生产构建、生产依赖审计和私有资源门禁均通过；
-- 生产入口恢复为约 114 kB，冻结的 MMD 主机保持独立懒加载分块；生产 JS 不包含 ARDY 3D/CoreSkin 调试故障文案；
+- `scripts/verify.ps1 -SkipInstall` 通过：Protocol 26、Companion 148、Wallpaper 92，共 266 项测试全绿；TypeScript 检查、Python Bridge 编译、Wallpaper 生产构建、生产依赖审计和私有资源门禁均通过；
+- 普通生产入口约 115.6 kB，冻结的 MMD 主机和显式 3D 调试表面保持独立懒加载分块；入口 JS 不包含 ARDY 3D/CoreSkin 调试故障文案；
 - 本轮未运行真实私有 Live2D 模型或 Wallpaper Engine CEF，因此向导画面、可见步态、DevTools、暂停/恢复和页面重载仍是独立验收项。
 
 ### 未关闭的运行验收

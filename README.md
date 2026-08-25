@@ -34,7 +34,7 @@ Agent 计划中的 replyText -> LiveTalker TTS / fixture / 包外 JSONL 小模�
 - **MotionScheduler 连续调度**：`advance()` 仅保留给 headless 测试；生产续写只采用 Renderer 的 `motion.playback` 回执。抢占会取消生成器实际收到的 signal，发布失败的未观察 buffer 会回滚；预测 replan 生成的下一段先留在独立 buffer，只有进入 handoff 窗口才提交。
 - **ARDY 待机连续动作**：`motionSemantic.idlePool` 以 round-robin 选择待机 prompt，在当前动作剩余时间进入 lookahead 窗口后提前生成，并在 handoff 窗口发布；语音/视觉直接动作会取消过期预取。Renderer 新加入可单测的参数 crossfade，默认从当前真实参数姿态平滑过渡 180 ms。
 - **Live2D 原生渲染**：生成动作、原生动作和 debug fixture 现在是互斥的单一参数写入者；20 fps Canonical Motion 在渲染帧间做位置线性插值和四元数 slerp，生成开始采用 crossfade，根位移投影到画布并由 RigProfile 适配模型参数。
-- **浏览器构建**：冻结的 PMX/MMD 主机按需加载；ARDY 3D/CoreSkin 调试表面仅在 Vite 开发环境动态导入，不进入生产入口；第三方依赖的 Node-only 可选分支有明确浏览器 stub，不再产生 Vite browser-external 告警。
+- **浏览器构建**：冻结的 PMX/MMD 主机按需加载；ARDY 3D/CoreSkin 调试表面只在显式 `?3dDebug=1` 时加载独立分块，不进入普通壁纸入口；Vite dev/preview 通过固定白名单路由读取包外调试夹具，不把它们复制进 `dist`。
 - **视觉事件**：`VisionProcessClient` + `scripts/mediapipe-vision-bridge.py` 只接受严格的派生观察；presence、头向、举手、挥手采用迟滞/连续帧/冷却窗口，事件 action 通过 allowlist 接入动作策略。`--simulate` 可在无摄像头/模型环境回归。
 - **语音事件**：`SpeechRuntime` 支持 `globalThis.rayureSpeech.submitText(...)` 和包外 ASR JSONL；已提供 LiveTalker `/api/chat` 与 `/api/synthesize` 兼容适配器，Agent 输出会转换为结构化 `BehaviorPlan`，TTS WAV 会转换为口型曲线；所有 provider 调用具备 signal/generation 抢占边界。
 - **音频与口型**：Companion 只发布 token 化音频和 `rayure.mouth-cues.v1` 曲线；Wallpaper `SpeechPlayer` 驱动 `ParamMouthOpenY` 类参数并回报 `speech.playback`。

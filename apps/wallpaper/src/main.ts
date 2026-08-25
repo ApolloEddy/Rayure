@@ -52,7 +52,10 @@ let live2dDebugBackdropVisible = debugQuery.get('backdrop') === '1'
 // ARDY 3D debug surface: `?3dDebug=1` fills the stage with a WebGL view driving
 // the same generated Canonical Motion on the official ARDY CoreSkin mannequin
 // (an alternative PMX only loads through an explicit `?3dModelUrl=`).
-const ardy3dDebugEnabled = import.meta.env.DEV && debugQuery.get('3dDebug') === '1'
+// The built local preview must keep this explicit diagnostic route available.
+// Its implementation remains a dynamic chunk and is never fetched by the
+// ordinary wallpaper unless the query is present.
+const ardy3dDebugEnabled = debugQuery.get('3dDebug') === '1'
 const ardy3dModelUrlOverride = parseLocal3dDebugUrl(debugQuery.get('3dModelUrl'))
 // 3D debug is a dedicated view: the 3D surface fills the stage and the
 // diagnostics panel docks to the left so neither covers the rig.  The attribute
