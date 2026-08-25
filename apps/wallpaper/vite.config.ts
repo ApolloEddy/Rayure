@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import type { Plugin } from 'vite'
 
-const scratchRoot = fileURLToPath(new URL('../../scratch/', import.meta.url))
 const browserPathShim = fileURLToPath(new URL('./src/live2d/path-browser.ts', import.meta.url))
 const browserNodeBuiltinsShim = fileURLToPath(new URL('./src/browser-node-builtins.ts', import.meta.url))
 const sceneArchiveRoot = fileURLToPath(new URL('../../scratch/japanese_room/public-scenes-archive/', import.meta.url))
@@ -37,8 +36,8 @@ function privateSceneArchivePlugin(): Plugin {
           next()
           return
         }
-        const fileName = decodeURIComponent(pathname.slice(SCENE_ROUTE_PREFIX.length))
-        if (fileName.length === 0 || fileName.includes('/') || fileName.includes('\\') || fileName.includes('\0') || fileName.includes('..')) {
+        const fileName = decodeSingleFileName(pathname.slice(SCENE_ROUTE_PREFIX.length))
+        if (fileName === undefined) {
           res.statusCode = 400
           res.end()
           return
@@ -86,21 +85,23 @@ function rayureDebugAssetsPlugin(): Plugin {
       server.middlewares.use((req, res, next) => {
         const pathname = new URL(req.url ?? '/', 'http://127.0.0.1').pathname
         if (pathname.startsWith('/@rayure-assets/')) {
-          const fileName = decodeURIComponent(pathname.slice('/@rayure-assets/'.length))
-          if (
-            fileName.length === 0
-            || fileName.includes('/')
-            || fileName.includes('\\')
-            || fileName.includes('\0')
-            || fileName.includes('..')
-          ) {
+          const fileName = decodeSingleFileName(pathname.slice('/@rayure-assets/'.length))
+          if (fileName === undefined) {
             res.statusCode = 400
             res.end()
             return
           }
-          const mimeType = fileName.endsWith('.pmx')
+          const extension = fileName.slice(fileName.lastIndexOf('.')).toLowerCase()
+          const mimeType = extension === '.pmx'
             ? 'application/octet-stream'
-            : 'application/json; charset=utf-8'
+            : extension === '.json'
+              ? 'application/json; charset=utf-8'
+              : undefined
+          if (mimeType === undefined) {
+            res.statusCode = 404
+            res.end()
+            return
+          }
           serveStatic(res, join(ardyAssetsRoot, fileName), mimeType)
           return
         }
@@ -108,6 +109,25 @@ function rayureDebugAssetsPlugin(): Plugin {
       })
     },
   }
+}
+
+export function decodeSingleFileName(value: string): string | undefined {
+  let fileName: string
+  try {
+    fileName = decodeURIComponent(value)
+  }
+  catch {
+    return undefined
+  }
+  if (
+    fileName.length === 0
+    || fileName.length > 255
+    || fileName.includes('/')
+    || fileName.includes('\\')
+    || fileName.includes('\0')
+    || fileName.includes('..')
+  ) return undefined
+  return fileName
 }
 
 function serveStatic(res: import('node:http').ServerResponse, path: string, contentType: string): void {
@@ -166,9 +186,9 @@ export default defineConfig({
     port: 4173,
     strictPort: true,
     fs: {
-      // app root so dev-only probe pages (e.g. scratch/ardy3d/pmx-bones.html
-      // importing from the app's node_modules) are servable in the dev server.
-      allow: [scratchRoot, fileURLToPath(new URL('.', import.meta.url))],
+      // Private scratch content is reachable only through the fixed middleware
+      // routes above; Vite's broad /@fs/ gateway remains confined to the app.
+      allow: [fileURLToPath(new URL('.', import.meta.url))],
     },
   },
   preview: {

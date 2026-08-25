@@ -339,22 +339,53 @@ export class Live2dNativeSurface implements Live2dParameterSink {
     } | undefined
     const parameters = model?.parameters
     if (parameters?.ids === undefined) return []
-    return parameters.ids.map((id, index) => ({
-      id,
-      min: parameters.minimumValues?.[index] ?? -1,
-      max: parameters.maximumValues?.[index] ?? 1,
-      defaultValue: parameters.defaultValues?.[index] ?? 0,
-    }))
+    const ranges: Live2dParameterRange[] = []
+    const seen = new Set<string>()
+    for (const [index, id] of parameters.ids.entries()) {
+      const min = parameters.minimumValues?.[index] ?? -1
+      const max = parameters.maximumValues?.[index] ?? 1
+      const defaultValue = parameters.defaultValues?.[index] ?? 0
+      if (
+        typeof id !== 'string'
+        || id.length < 1
+        || id.length > 128
+        || id.trim() !== id
+        || /[\u0000-\u001F\u007F]/u.test(id)
+        || seen.has(id)
+        || !Number.isFinite(min)
+        || !Number.isFinite(max)
+        || !Number.isFinite(defaultValue)
+        || min >= max
+        || defaultValue < min
+        || defaultValue > max
+      ) continue
+      seen.add(id)
+      ranges.push({ id, min, max, defaultValue })
+    }
+    return ranges
   }
 
   getPartIds(): readonly string[] {
     if (!this.#modelReady) return []
     const model = this.#model as unknown as { parts?: { ids?: readonly string[] } } | undefined
-    return [...(model?.parts?.ids ?? [])]
+    return [...new Set((model?.parts?.ids ?? []).filter(id => (
+      typeof id === 'string'
+      && id.length > 0
+      && id.length <= 128
+      && id.trim() === id
+      && !/[\u0000-\u001F\u007F]/u.test(id)
+    )))]
   }
 
   setPartOpacity(partId: string, opacity: number): boolean {
-    if (!this.#modelReady || !this.#model?.setPartOpacity || !Number.isFinite(opacity)) return false
+    if (
+      !this.#modelReady
+      || !this.#model?.setPartOpacity
+      || !this.getPartIds().includes(partId)
+      || !Number.isFinite(opacity)
+      || opacity < 0
+      || opacity > 1
+    ) return false
     this.#model.setPartOpacity(partId, opacity)
     return true
   }

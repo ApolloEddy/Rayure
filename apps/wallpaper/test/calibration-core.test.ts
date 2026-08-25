@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   classifyCalibrationChannels,
+  createCalibrationBinding,
   missingCalibrationControls,
   serializeCalibration,
 } from '../src/live2d/calibration-core.ts'
@@ -54,13 +55,36 @@ test('serializeCalibration round-trips bindings, disabled controls and pose', ()
     LINGBO10_LIVE2D_RIG_PROFILE,
     ['leftArmAngle'],
     { ParamAngleX: 5, Param7: 0 },
+    ['Part45', 'Part46'],
   )
   assert.equal(serialized.profileId, LINGBO10_LIVE2D_RIG_PROFILE.id)
   assert.deepEqual(serialized.disabledControls, ['leftArmAngle'])
   assert.deepEqual(serialized.neutralPose, { ParamAngleX: 5, Param7: 0 })
+  assert.deepEqual(serialized.skinHiddenPartIds, ['Part45', 'Part46'])
   const arm = serialized.parameters.find(binding => binding.control === 'rightArmAngle')
   assert.equal(arm?.parameterId, 'Param2')
   assert.equal(serialized.parameters.some(binding => binding.control === 'leftArmAngle'), false)
+})
+
+test('calibration binding preserves the model-authored parameter range', () => {
+  assert.deepEqual(createCalibrationBinding('leftThighAngle', {
+    id: 'Param7',
+    min: -2,
+    max: 6,
+    defaultValue: 1.25,
+  }), {
+    parameterId: 'Param7',
+    control: 'leftThighAngle',
+    min: -2,
+    max: 6,
+    neutral: 1.25,
+  })
+  assert.throws(() => createCalibrationBinding('headYaw', {
+    id: 'ParamBad',
+    min: 1,
+    max: 1,
+    defaultValue: 1,
+  }), /range/u)
 })
 
 test('parameter grouping folds EyeL/EyeR variants into one readable group', () => {

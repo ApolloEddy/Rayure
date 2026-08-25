@@ -74,8 +74,8 @@ test('trim: a raise-and-hold gesture drops the static tail and returns to neutra
   const startZ = motion.frames[0]!.joints.right_wrist!.position[2]
   assert.ok(peakZ > 0.68, `peak ${peakZ} should reach the held height`)
   // The blend descends back to the neutral start height instead of freezing.
-  assert.ok(Math.abs(last.joints.right_wrist!.position[2] - startZ) < 0.1,
-    `wrist ${last.joints.right_wrist!.position[2]} should return near start ${startZ}`)
+  assert.ok(Math.abs(last.joints.right_wrist!.position[2] - startZ) < 1e-9,
+    `wrist ${last.joints.right_wrist!.position[2]} should return exactly to start ${startZ}`)
   // The blend starts by coming down from the hold, not jerking further up.
   const holdZ = motion.frames[RAISE_HOLD_END]!.joints.right_wrist!.position[2]
   const firstBlendZ = trimmed.frames[trimmed.frames.length - BLEND_FRAMES]!.joints.right_wrist!.position[2]

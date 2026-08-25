@@ -34,7 +34,7 @@ test('local config resolves one existing PMX without exposing extra fields', asy
   assert.equal(config.model?.displayName, 'Local test model')
 })
 
-test('local config resolves a Live2D model3 entry without exposing extra fields', async (t) => {
+test('local config resolves a Live2D model and isolates its writable calibration state', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'rayure-config-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const modelPath = join(root, 'Hiyori.model3.json')
@@ -49,12 +49,17 @@ test('local config resolves a Live2D model3 entry without exposing extra fields'
     },
   }))
 
-  const config = await loadLocalConfig(configPath)
-  assert.deepEqual(config.model, {
+  const stateRoot = join(root, 'state')
+  const config = await loadLocalConfig(configPath, { stateRoot })
+  const calibrationFilePath = config.model?.calibrationFilePath
+  assert.ok(calibrationFilePath?.startsWith(stateRoot))
+  assert.equal(calibrationFilePath?.startsWith(join(root, 'Hiyori')), false)
+  assert.deepEqual({ ...config.model, calibrationFilePath: undefined }, {
     id: 'hiyori-debug',
     displayName: 'Hiyori debug',
     format: 'live2d',
     entryFilePath: modelPath,
+    calibrationFilePath: undefined,
   })
 })
 

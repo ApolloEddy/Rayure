@@ -122,7 +122,9 @@ function returnToNeutralBlend(
   const stepMs = Math.round(1000 / fps)
   const frames: CanonicalMotionFrame[] = []
   for (let b = 1; b <= BLEND_FRAMES; b += 1) {
-    const t = b / (BLEND_FRAMES + 1)
+    // The final frame must actually reach the neutral relative pose. Stopping
+    // at BLEND_FRAMES/(BLEND_FRAMES+1) leaves a permanent residual bend.
+    const t = b / BLEND_FRAMES
     frames.push(blendFrame(last, neutral, t, last.timeMs + b * stepMs))
   }
   return frames

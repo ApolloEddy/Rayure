@@ -1,10 +1,10 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { IncomingMessage, Server as HttpServer, ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { Duplex } from 'node:stream'
 
 import {
@@ -156,6 +156,7 @@ interface PreparedModel extends PreparedAsset {
   live2dMotions: readonly PreparedLive2dMotion[]
   nativeEntryFileName?: string
   calibrationEntryFileName?: string
+  calibrationFilePath?: string
   skinHiddenPartIds: readonly string[]
 }
 
@@ -692,11 +693,16 @@ async function prepareModel(source: CompanionModelSource, assetToken: string): P
     : []
   if (source.format === 'live2d') {
     const model3 = await prepareLive2dModel3Entries(entryFilePath)
-    const calibration = await readLive2dCalibrationEntry(entryFilePath)
-    const skinHiddenPartIds = [...new Set([
+    const calibrationFilePath = resolvePreparedCalibrationFilePath(source, entryFilePath)
+    const calibration = calibrationFilePath === undefined
+      ? await readLegacyLive2dCalibrationEntry(entryFilePath)
+      : await readLive2dCalibrationEntry(calibrationFilePath)
+        ?? await readLegacyLive2dCalibrationEntry(entryFilePath)
+    const configuredSkinHiddenPartIds = [...new Set([
       ...model3.autoHiddenPartIds,
       ...(source.skinHiddenPartIds ?? []),
     ])]
+    const skinHiddenPartIds = calibration?.calibration.skinHiddenPartIds ?? configuredSkinHiddenPartIds
     const virtualFiles = new Map([
       [model3.skinEntryFileName, model3.skinContent],
       [model3.nativeEntryFileName, model3.nativeContent],
@@ -709,7 +715,9 @@ async function prepareModel(source: CompanionModelSource, assetToken: string): P
       assetToken,
       virtualFiles,
       nativeEntryFileName: model3.nativeEntryFileName,
-      ...(calibration === undefined ? {} : { calibrationEntryFileName: calibration.fileName }),
+      ...(calibrationFilePath === undefined
+        ? calibration === undefined ? {} : { calibrationEntryFileName: calibration.fileName }
+        : { calibrationEntryFileName: CALIBRATION_FILE_NAME, calibrationFilePath }),
       skinHiddenPartIds,
       live2dMotions,
     }
@@ -772,21 +780,41 @@ const CALIBRATION_FILE_NAME = 'rayure.calibration.json'
 const MAX_CALIBRATION_BYTES = 256 * 1024
 
 /**
- * Reads the model-local rayure.calibration.json when present and valid.
- * A missing or malformed calibration file is not an error: the model still
- * loads with the default rig profile and pose.
+ * Resolves the internal writable calibration state file. It must remain
+ * outside the private model tree so the asset source stays read-only.
  */
-async function readLive2dCalibrationEntry(
+function resolvePreparedCalibrationFilePath(
+  source: CompanionModelSource,
   entryFilePath: string,
-): Promise<{ fileName: string, content: Buffer } | undefined> {
-  const rootPath = dirname(entryFilePath)
-  const candidate = resolve(rootPath, CALIBRATION_FILE_NAME)
-  if (!isContainedPath(rootPath, candidate)) return undefined
+): string | undefined {
+  if (source.calibrationFilePath === undefined) return undefined
+  if (!isAbsolute(source.calibrationFilePath)) {
+    throw new Error('Live2D calibration state path must be absolute')
+  }
+  const candidate = resolve(source.calibrationFilePath)
+  if (extname(candidate).toLowerCase() !== '.json') {
+    throw new Error('Live2D calibration state path must be a JSON file')
+  }
+  if (isContainedPath(dirname(entryFilePath), candidate)) {
+    throw new Error('Live2D calibration state path must stay outside the model asset directory')
+  }
+  return candidate
+}
+
+/** Reads one exact local-state calibration file when present and valid. */
+async function readLive2dCalibrationEntry(
+  candidate: string,
+): Promise<{
+  fileName: string
+  content: Buffer
+  calibration: ReturnType<typeof parseLive2dCalibration>
+} | undefined> {
   let bytes: Buffer
   try {
+    const resolvedDirectory = await realpath(dirname(candidate))
     const resolved = await realpath(candidate)
     const metadata = await stat(resolved)
-    if (!isContainedPath(rootPath, resolved) || !metadata.isFile() || metadata.size > MAX_CALIBRATION_BYTES) {
+    if (!isContainedPath(resolvedDirectory, resolved) || !metadata.isFile() || metadata.size > MAX_CALIBRATION_BYTES) {
       return undefined
     }
     bytes = await readFile(resolved)
@@ -794,19 +822,33 @@ async function readLive2dCalibrationEntry(
   catch {
     return undefined
   }
+  let calibration: ReturnType<typeof parseLive2dCalibration>
   try {
-    parseLive2dCalibration(JSON.parse(bytes.toString('utf8')))
+    calibration = parseLive2dCalibration(JSON.parse(bytes.toString('utf8')))
   }
   catch {
     return undefined
   }
-  return { fileName: CALIBRATION_FILE_NAME, content: bytes }
+  return {
+    fileName: CALIBRATION_FILE_NAME,
+    content: Buffer.from(`${JSON.stringify(calibration, null, 2)}\n`, 'utf8'),
+    calibration,
+  }
 }
 
 /**
- * Persists the model's rayure.calibration.json from the calibration wizard.
- * Only the currently prepared Live2D model's own token may write, and only the
- * fixed file name is accepted. The body is fully validated before any write.
+ * Compatibility-only read of the old model-adjacent file. New saves always go
+ * to local state, so this never mutates the model asset tree.
+ */
+async function readLegacyLive2dCalibrationEntry(
+  entryFilePath: string,
+): ReturnType<typeof readLive2dCalibrationEntry> {
+  return readLive2dCalibrationEntry(resolve(dirname(entryFilePath), CALIBRATION_FILE_NAME))
+}
+
+/**
+ * Persists calibration to the per-user Rayure state store. Only the currently
+ * prepared Live2D model's token may write and the model tree stays read-only.
  */
 async function handleCalibrationSave(
   request: IncomingMessage,
@@ -819,21 +861,28 @@ async function handleCalibrationSave(
     respond(response, 404, 'Not Found')
     return
   }
-  const asset = assets.get(token) as (PreparedAsset & { source?: { format?: string } }) | undefined
-  if (asset === undefined || asset.source?.format !== 'live2d') {
+  const asset = assets.get(token)
+  if (!isPreparedLive2dModel(asset) || asset.calibrationFilePath === undefined) {
     respond(response, 404, 'Not Found')
     return
   }
-  let raw = ''
+  const contentType = request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase()
+  if (contentType !== 'application/json') {
+    respond(response, 415, 'Unsupported Media Type')
+    return
+  }
+  const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of request) {
-    size += chunk.length
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += bytes.byteLength
     if (size > MAX_CALIBRATION_BYTES) {
       respond(response, 413, 'Content Too Large')
       return
     }
-    raw += chunk.toString('utf8')
+    chunks.push(bytes)
   }
+  const raw = Buffer.concat(chunks).toString('utf8')
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
@@ -842,20 +891,17 @@ async function handleCalibrationSave(
     respond(response, 400, 'Invalid calibration JSON')
     return
   }
+  let calibration: ReturnType<typeof parseLive2dCalibration>
   try {
-    parseLive2dCalibration(parsed)
+    calibration = parseLive2dCalibration(parsed)
   }
   catch {
     respond(response, 400, 'Invalid calibration')
     return
   }
-  const target = resolve(asset.rootPath, CALIBRATION_FILE_NAME)
-  if (!isContainedPath(asset.rootPath, target)) {
-    respond(response, 403, 'Forbidden')
-    return
-  }
+  const canonicalRaw = `${JSON.stringify(calibration, null, 2)}\n`
   try {
-    await writeFile(target, raw, 'utf8')
+    await writeCalibrationFileAtomically(asset.calibrationFilePath, canonicalRaw, asset.rootPath)
   }
   catch {
     respond(response, 500, 'Could not write calibration')
@@ -864,11 +910,39 @@ async function handleCalibrationSave(
   // Keep the served virtual copy in sync so a later GET returns the saved file.
   const virtualFiles = asset.virtualFiles as ReadonlyMap<string, Buffer> | undefined
   if (virtualFiles !== undefined && typeof (virtualFiles as { set?: unknown }).set === 'function') {
-    (virtualFiles as unknown as Map<string, Buffer>).set(CALIBRATION_FILE_NAME, Buffer.from(raw, 'utf8'))
+    (virtualFiles as unknown as Map<string, Buffer>).set(CALIBRATION_FILE_NAME, Buffer.from(canonicalRaw, 'utf8'))
   }
   response.statusCode = 204
   response.setHeader('Cache-Control', 'no-store')
   response.end()
+}
+
+function isPreparedLive2dModel(asset: PreparedAsset | undefined): asset is PreparedModel {
+  return asset !== undefined
+    && 'source' in asset
+    && (asset as PreparedModel | PreparedMotion).source.format === 'live2d'
+}
+
+async function writeCalibrationFileAtomically(
+  target: string,
+  raw: string,
+  forbiddenAssetRoot: string,
+): Promise<void> {
+  const directory = dirname(target)
+  await mkdir(directory, { recursive: true })
+  const resolvedDirectory = await realpath(directory)
+  const resolvedTarget = join(resolvedDirectory, basename(target))
+  if (isContainedPath(forbiddenAssetRoot, resolvedTarget)) {
+    throw new Error('Live2D calibration state resolved inside the model asset directory')
+  }
+  const temporaryPath = join(resolvedDirectory, `.${basename(target)}.${randomUUID()}.tmp`)
+  try {
+    await writeFile(temporaryPath, raw, { encoding: 'utf8', flag: 'wx' })
+    await rename(temporaryPath, resolvedTarget)
+  }
+  finally {
+    await unlink(temporaryPath).catch(() => undefined)
+  }
 }
 
 async function inferLive2dScenePartIds(
@@ -1013,6 +1087,11 @@ async function handleHttpRequest(
     const virtualContent = asset.virtualFiles?.get(segments.join('/'))
     if (virtualContent !== undefined) {
       serveAssetBuffer(response, request.method, virtualContent, extension, request.headers.origin)
+      return
+    }
+    if (isPreparedLive2dModel(asset) && segments.join('/') === asset.calibrationEntryFileName) {
+      // Calibration lives in local state, never as a model-directory fallback.
+      respond(response, 404, 'Not Found')
       return
     }
 

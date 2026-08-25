@@ -36,8 +36,14 @@ export interface MotionSemanticIndex {
  * first '.', else the fallback group `misc`.
  */
 export function groupOfCacheKey(cacheKey: string): string {
-  const dot = cacheKey.indexOf('.')
-  if (dot > 0) return cacheKey.slice(0, dot)
+  const key = requireCacheKey(cacheKey)
+  const dot = key.indexOf('.')
+  if (dot > 0) {
+    const prefix = key.slice(0, dot)
+    // Cache keys allow ':' for wire identity, but Windows filenames do not.
+    // Unsafe/overlong prefixes share the bounded misc shard.
+    if (/^[A-Za-z0-9_-]{1,64}$/u.test(prefix)) return prefix
+  }
   return 'misc'
 }
 
@@ -207,7 +213,7 @@ function requireGroup(value: unknown, index: number): string {
     typeof value !== 'string'
     || value.length < 1
     || value.length > 64
-    || !/^[A-Za-z0-9._:-]+$/u.test(value)
+    || !/^[A-Za-z0-9_-]+$/u.test(value)
   ) {
     throw new Error(`entry ${index}.group is invalid`)
   }

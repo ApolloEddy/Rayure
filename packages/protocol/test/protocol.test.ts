@@ -237,7 +237,7 @@ test('model availability rejects calibration URLs for PMX models', () => {
   }), ProtocolValidationError)
 })
 
-test('calibration descriptor validates bindings, disabled controls and neutral pose', () => {
+test('calibration descriptor validates bindings, disabled controls, pose and hidden parts', () => {
   const valid = {
     profileId: 'rayure-live2d-lingbo10-v1',
     parameters: [
@@ -247,6 +247,7 @@ test('calibration descriptor validates bindings, disabled controls and neutral p
     ],
     disabledControls: ['leftThighAngle'],
     neutralPose: { ParamAngleX: 5, Param7: 0 },
+    skinHiddenPartIds: [],
   }
   assert.deepEqual(parseLive2dCalibration(valid), valid)
 
@@ -259,6 +260,8 @@ test('calibration descriptor validates bindings, disabled controls and neutral p
     { ...valid, parameters: [valid.parameters[0], valid.parameters[0]] },
     { ...valid, disabledControls: ['a', 'a'] },
     { ...valid, neutralPose: { 'bad\u0000key': 0 } },
+    { ...valid, skinHiddenPartIds: ['Part45', 'Part45'] },
+    { ...valid, skinHiddenPartIds: ['bad\u0000part'] },
     { ...valid, extraField: true },
   ]) {
     assert.throws(() => parseLive2dCalibration(bad), ProtocolValidationError)

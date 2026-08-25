@@ -17,6 +17,41 @@ export interface CalibrationChannelState {
   binding?: Live2dParameterBinding
 }
 
+export interface CalibrationParameterRange {
+  id: string
+  min: number
+  max: number
+  defaultValue: number
+}
+
+/** Builds a binding from the model's authored range instead of guessed degrees. */
+export function createCalibrationBinding(
+  control: Live2dControl,
+  range: CalibrationParameterRange,
+): Live2dParameterBinding {
+  if (
+    range.id.length < 1
+    || range.id.length > 128
+    || range.id.trim() !== range.id
+    || /[\u0000-\u001F\u007F]/u.test(range.id)
+    || !Number.isFinite(range.min)
+    || !Number.isFinite(range.max)
+    || !Number.isFinite(range.defaultValue)
+    || range.min >= range.max
+    || range.defaultValue < range.min
+    || range.defaultValue > range.max
+  ) {
+    throw new Error('Live2D calibration parameter range is invalid')
+  }
+  return {
+    parameterId: range.id,
+    control,
+    min: range.min,
+    max: range.max,
+    neutral: range.defaultValue,
+  }
+}
+
 /** All ARDY controls in the fixed channel order used by the wizard. */
 export function allCalibrationChannels(): readonly Live2dControl[] {
   return LIVE2D_CONTROL_VALUES
@@ -61,6 +96,7 @@ export function serializeCalibration(
   profile: Live2dRigProfile,
   disabledControls: readonly string[],
   neutralPose: Live2dNeutralPose | undefined,
+  skinHiddenPartIds: readonly string[] = [],
 ): Live2dCalibrationDescriptor {
   return {
     profileId: profile.id,
@@ -76,5 +112,6 @@ export function serializeCalibration(
     })),
     ...(disabledControls.length === 0 ? {} : { disabledControls: [...disabledControls] }),
     ...(neutralPose === undefined ? {} : { neutralPose }),
+    skinHiddenPartIds: [...new Set(skinHiddenPartIds)],
   }
 }

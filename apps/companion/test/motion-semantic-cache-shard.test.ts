@@ -44,6 +44,8 @@ test('groupOfCacheKey matches the offline split tool rule', () => {
   assert.equal(groupOfCacheKey('wave.casual.loop'), 'wave')
   assert.equal(groupOfCacheKey('run'), 'misc')
   assert.equal(groupOfCacheKey('daily.walk'), 'daily')
+  assert.equal(groupOfCacheKey('windows:unsafe.walk'), 'misc')
+  assert.equal(groupOfCacheKey(`${'a'.repeat(65)}.walk`), 'misc')
 })
 
 test('sharded cache loads a shard lazily and serves hits and misses', async (t) => {

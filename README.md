@@ -25,7 +25,7 @@ Agent 计划中的 replyText -> LiveTalker TTS / fixture / 包外 JSONL 小模�
   -> SpeechPlayer -> Live2D mouth channel + speech.playback
 ```
 
-2026-08-25 收尾边界：当前岛风模型的真实 parameter id 已确认，代码中有一个显式 Shimakaze RigProfile，用于把 ARDY 的头、身、手臂、腿、膝、脚和蹲起控制投影到该模型的非标准参数。这个 profile 仍是模型专属的手工校准，通用的 model3/DisplayInfo 导入、映射结果/缺失参数诊断和“任意新模型自动适配”尚未完成；本地浏览器看到生成请求 `completed` 也不等于已经通过可见步态或 Wallpaper Engine CEF 验收。
+2026-08-26 恢复边界：岛风仍保留显式模型专属 RigProfile；新模型可用四步向导逐项试摆、保存参数映射/禁用通道/隐藏部件/中性姿势，但这不是根据 DisplayInfo 自动理解任意模型语义。校准写入每用户 Rayure 状态目录，不修改模型包；保存失败不会再被标记为成功。本地浏览器看到生成请求 `completed` 仍不等于可见步态或 Wallpaper Engine CEF 验收。
 
 已完成的里程碑：
 
@@ -34,12 +34,12 @@ Agent 计划中的 replyText -> LiveTalker TTS / fixture / 包外 JSONL 小模�
 - **MotionScheduler 连续调度**：`advance()` 仅保留给 headless 测试；生产续写只采用 Renderer 的 `motion.playback` 回执。抢占会取消生成器实际收到的 signal，发布失败的未观察 buffer 会回滚；预测 replan 生成的下一段先留在独立 buffer，只有进入 handoff 窗口才提交。
 - **ARDY 待机连续动作**：`motionSemantic.idlePool` 以 round-robin 选择待机 prompt，在当前动作剩余时间进入 lookahead 窗口后提前生成，并在 handoff 窗口发布；语音/视觉直接动作会取消过期预取。Renderer 新加入可单测的参数 crossfade，默认从当前真实参数姿态平滑过渡 180 ms。
 - **Live2D 原生渲染**：生成动作、原生动作和 debug fixture 现在是互斥的单一参数写入者；20 fps Canonical Motion 在渲染帧间做位置线性插值和四元数 slerp，生成开始采用 crossfade，根位移投影到画布并由 RigProfile 适配模型参数。
-- **浏览器构建**：冻结的 PMX/MMD 主机按需加载；第三方依赖的 Node-only 可选分支有明确浏览器 stub，不再产生 Vite browser-external 告警，最大 JS 分块为 380 kB。
+- **浏览器构建**：冻结的 PMX/MMD 主机按需加载；ARDY 3D/CoreSkin 调试表面仅在 Vite 开发环境动态导入，不进入生产入口；第三方依赖的 Node-only 可选分支有明确浏览器 stub，不再产生 Vite browser-external 告警。
 - **视觉事件**：`VisionProcessClient` + `scripts/mediapipe-vision-bridge.py` 只接受严格的派生观察；presence、头向、举手、挥手采用迟滞/连续帧/冷却窗口，事件 action 通过 allowlist 接入动作策略。`--simulate` 可在无摄像头/模型环境回归。
 - **语音事件**：`SpeechRuntime` 支持 `globalThis.rayureSpeech.submitText(...)` 和包外 ASR JSONL；已提供 LiveTalker `/api/chat` 与 `/api/synthesize` 兼容适配器，Agent 输出会转换为结构化 `BehaviorPlan`，TTS WAV 会转换为口型曲线；所有 provider 调用具备 signal/generation 抢占边界。
 - **音频与口型**：Companion 只发布 token 化音频和 `rayure.mouth-cues.v1` 曲线；Wallpaper `SpeechPlayer` 驱动 `ParamMouthOpenY` 类参数并回报 `speech.playback`。
 
-`CHANGELOG.md` 已记录 2026-08-25 的未发布变更（最新开发基线为 `0.6.0-dev`，此前的 3D 记录为 0.4.8），根工作区 manifest 仍为 0.2.0。本仓库应视为开发快照。本次本地测试通过 211 项（协议 23、Companion 120、Wallpaper 68）；TypeScript、生产构建、四条 Python bridge 编译与发布边界审计仍按独立门禁记录，Live2D 模型专属参数映射和 Wallpaper Engine CEF 可见步态尚未关闭。
+`CHANGELOG.md` 已记录 2026-08-26 的恢复性审计，根工作区 manifest 仍为 0.2.0，本仓库应视为开发快照。自动化测试、TypeScript、生产构建、Python bridge 编译、依赖审计和私有资源门禁以 `scripts/verify.ps1` 为准；真实模型标定效果、ARDY 可见步态和 Wallpaper Engine CEF/DevTools 仍是独立验收项。
 
 ## 已实现
 
@@ -61,7 +61,7 @@ Agent 计划中的 replyText -> LiveTalker TTS / fixture / 包外 JSONL 小模�
 
 Live2D 在 Wallpaper Engine 中默认按“皮套”接入：Companion 会把 `.model3.json` 的默认入口生成为不含 `Motions` 的 skin-only 入口，避免把模型自带场景和动作无条件带进壁纸；Rayure 自己的 Canonical Motion、口型、鼠标和行为交互仍由现有运行时负责。模型原生动作/场景层只有在 Wallpaper Engine 属性中勾选 **Import model-native content / 导入模型自带内容** 后，才会重新加载原生入口。
 
-本地 `http://127.0.0.1:4173/` 浏览器预览是开发例外：为了能立即验证动作和点击交互，它会自动加载原生动作但仍隐藏模型自带场景层；追加 `?live2dDebug=1` 可打开开发面板，追加 `?live2dNativeContent=0` 可强制回到 skin-only，追加 `?live2dNativeScene=1` 才显示模型包内场景层。当前 Shimakaze 资源没有 `Expressions`/`.exp3`，因此开发面板会禁用表情按钮并展示可用的原生动作目录；调试面板中的 ARDY 区域可输入描述并直接请求生成，挥手/走路快捷预设使用本地语义缓存，任意新 Prompt 需要配置 Text Encoder 才能命中语义特征。
+本地 `http://127.0.0.1:4173/` 浏览器预览与 Wallpaper Engine 默认都使用 skin-only；追加 `?live2dNativeContent=1` 才导入模型原生动作，`?live2dNativeScene=1` 才显示模型包内场景层，`?live2dDebug=1` 可打开开发面板。当前 Shimakaze 资源没有 `Expressions`/`.exp3`，因此开发面板会禁用表情按钮并展示可用的原生动作目录；调试面板中的 ARDY 区域可输入描述并直接请求生成，挥手/走路快捷预设使用本地语义缓存，任意新 Prompt 需要配置 Text Encoder 才能命中语义特征。
 
 模型把背景、镜子、粒子等做进 drawable/part 层时，不能只靠删除动作文件。可在包外的 `rayure.local.json` 为 Live2D 模型声明要隐藏的部件：
 
@@ -94,7 +94,7 @@ Wallpaper Engine / CEF
                          v
                    Rayure Companion
        |- strict versioned protocol
-       |- tokenized read-only asset gateway
+       |- tokenized read-only asset gateway + isolated calibration state
        |- Motion Semantic Feature Cache
        |- MotionScheduler + IdleMotionPool（Renderer 回执、预测预取、打断/续写调度）
        |- SceneEntityRegistry（坐标变换/目标约束）

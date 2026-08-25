@@ -12,7 +12,7 @@ Wallpaper Engine 默认读取 Companion 生成的 skin-only `.model3.json`：
 - cdi3/配置识别出的背景、镜子、地板、粒子等场景部件按皮套规则隐藏；
 - Wallpaper Engine 页面不再显示旧的动作/表情调试按钮。
 
-当前本机 Shimakaze 资源的 `Expressions` 数组为空，因而没有可触发的 `.exp3` 表情；它提供的是 `touch_head`、`touch_body`、`idle` 等原生动作。浏览器开发预览会自动启用这些原生动作、隐藏模型自带场景层，并允许直接点击角色头部/身体触发对应动作；`?live2dDebug=1` 还会显示动作目录、背景/场景层切换和表情资源诊断。
+当前本机 Shimakaze 资源的 `Expressions` 数组为空，因而没有可触发的 `.exp3` 表情；它提供的是 `touch_head`、`touch_body`、`idle` 等原生动作。浏览器开发预览默认仍是 skin-only；显式追加 `?live2dNativeContent=1` 后才启用这些原生动作，`?live2dDebug=1` 只负责显示动作目录、背景/场景层切换和表情资源诊断。
 
 在 Wallpaper Engine 属性中勾选 **Import model-native content / 导入模型自带内容** 后，Renderer 会重新加载 Companion 提供的原生入口，恢复模型包内的场景层和动作目录。原生动作由 Companion/运行时交互驱动，不通过桌面调试栏暴露。
 
@@ -49,16 +49,15 @@ pnpm dev:wallpaper
 
 ## 初始姿势（M1）
 
-加载后所有 Live2D 模型默认应用**模型中性姿势**（参数默认值），动作结束后淡回该姿势；可通过模型专属 `rayure.calibration.json` 的 `neutralPose` 覆盖为标定快照，ARDY 动作以该姿势为 offset 基准叠加。未配置时使用参数默认值（立绘姿势）。
+加载后所有 Live2D 模型默认应用**模型中性姿势**（参数默认值），动作结束后淡回该姿势；可通过模型专属校准状态的 `neutralPose` 覆盖为标定快照，ARDY 动作以该姿势为 offset 基准叠加。未配置时使用参数默认值（立绘姿势）。
 
 ## 标定向导（M2）
 
-Live2D 模型加载后，若无 `rayure.calibration.json` 且从未标定过，自动弹出**模型标定向导**（四步）：
+Live2D 模型加载后，若本机状态目录没有有效校准且当前会话未选择“稍后”，自动弹出**模型标定向导**（四步）：
 
-1. **ARDY 通道标定**：未映射的通道列出候选参数，点击「试摆」实时驱动模型观察部位，确认后写入映射；可反转方向，可禁用模型不具备的部位。
+1. **ARDY 通道标定**：未映射的通道列出候选参数，点击「试摆」实时驱动模型观察部位，确认后保留该参数真实的 min/max/default；可反转方向，可禁用模型不具备的部位。
 2. **场景部件**：逐个 toggle 部件透明度，勾选生成 `skinHiddenPartIds`（替代自动识别缺失时的手工配置）。
 3. **初始姿势**：滑杆微调映射参数摆出站立/放下姿势，捕获为 `neutralPose` 快照。
-4. **保存**：POST 到 Companion 的校准端点，写入模型目录 `rayure.calibration.json`，刷新后生效。手动进入用 `?calibrate=1`。
+4. **保存**：POST 到 Companion 的 tokenized 校准端点；服务端校验并原子写入本机状态目录，成功后自动重新加载模型。HTTP/网络失败会保留向导并显示错误；手动进入用 `?calibrate=1`。
 
-校准文件由 Companion 校验并通过 tokenized `calibrationUrl` 下发；`skinHiddenPartIds` 的优先级为 校准文件 > 自动识别 > `rayure.local.json`。任何模型资源的来源（含校准文件）仍在 `scratch/` 或模型目录内，不入仓库/发布包。
-
+Windows 默认状态位置为 `%LOCALAPPDATA%\Rayure\calibrations\<model-id>-<path-hash>.json`；其他平台使用用户目录下的 `.rayure/calibrations`。模型旁旧 `rayure.calibration.json` 只做兼容读取，所有新保存都写入状态目录。`skinHiddenPartIds`（包括空列表）优先于自动识别/`rayure.local.json`；模型、纹理和动作目录始终只读且不进入仓库或发布包。

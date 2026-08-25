@@ -153,6 +153,19 @@ try {
         }
     }
 
+    $developmentOnlyRuntimeMarkers = @(
+        'PMX model exposes no skinned mesh to drive',
+        'Core skin fetch failed with HTTP'
+    )
+    foreach ($artifact in ($textArtifacts | Where-Object { $_.Extension -eq '.js' })) {
+        $artifactContent = Get-Content -Raw -LiteralPath $artifact.FullName
+        foreach ($marker in $developmentOnlyRuntimeMarkers) {
+            if ($artifactContent.Contains($marker)) {
+                throw "Development-only 3D debug runtime entered the wallpaper build: $marker in $($artifact.FullName)"
+            }
+        }
+    }
+
     $trackedLocalConfig = @(& git ls-files -- 'rayure.local.json')
     if ($LASTEXITCODE -ne 0) {
         throw "Git local-config check failed with exit code $LASTEXITCODE"

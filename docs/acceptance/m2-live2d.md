@@ -1,6 +1,6 @@
 # M2 Live2D 皮套与原生内容验收
 
-状态：岛风 skin-only/原生内容切换已完成浏览器技术预检；模型专属参数映射和 ARDY 可见步态尚未验收；Wallpaper Engine CEF 的最终画面、DevTools、暂停/恢复和本轮生成动作仍是独立验收项。
+状态：岛风 skin-only/原生内容切换已完成既有浏览器技术预检；校准存储、协议和失败边界已有自动化覆盖，但模型专属向导的真实画面效果与 ARDY 可见步态尚未验收；Wallpaper Engine CEF 的最终画面、DevTools、暂停/恢复和本轮生成动作仍是独立验收项。
 
 ## 范围
 
@@ -10,7 +10,7 @@
 
 - 当前岛风 model3 实测 545 个参数；腿脚和部分手臂使用 `Param7/8/9/10/11/12/14/15/16/17/19/79/80/86/286` 等非标准 ID。
 - 代码已加入显式 Shimakaze RigProfile，能够把 Canonical Motion 的相关控制计算成这些真实 ID 的写入值；标准 profile 仍保留给使用标准 Cubism 参数名的模型。
-- 这还不是通用导入器：尚未从 model3/cdi3 的 DisplayInfo 自动生成或校准 RigProfile，也没有在调试页完整报告每个 Canonical 控制的已映射/缺失状态。
+- 四步向导现在可以逐个试摆并保存映射、禁用通道、隐藏部件和中性姿势；它使用模型真实参数范围，但仍不是从 DisplayInfo 自动理解任意模型语义的通用导入器。
 - `walk.forward` 的生成/发布/完成回执已能在普通浏览器链路中观察到，但本次记录不把它记为可见行走验收；需要下一次先完成映射诊断与逐模型校准，再在 Wallpaper Engine CEF 复核。
 
 ## 自动化门禁
@@ -33,11 +33,12 @@ git ls-files -- 'scratch/**' 'apps/wallpaper/dist/**' '*.model3.json' '*.moc3' '
 ## 浏览器技术预检
 
 1. 使用被忽略的 `scratch/live2d-samples/Shimakaze/rayure.local.live2d-debug.json` 启动 Companion，并启动 Vite。
-2. 打开 `http://127.0.0.1:4173/`。浏览器开发预览会加载原生动作入口但隐藏模型自带场景部件；角色应保持比例、点击头部/身体应触发 `touch_head`/`touch_body` 等动作，不应出现被拉伸的全屏房间贴图。
-3. 追加 `?live2dDebug=1`，确认开发面板显示动作目录、原生内容开关、背景开关和表达式资源状态；当前 Shimakaze 无 `Expressions` 时表情按钮应禁用。追加 `?live2dNativeContent=0` 可验证 skin-only 入口和无动作状态。
+2. 打开 `http://127.0.0.1:4173/`。浏览器开发预览应使用 skin-only 入口，不拉取模型自带 `.motion3.json`，也不显示模型场景部件或被拉伸的全屏房间贴图。
+3. 追加 `?live2dNativeContent=1&live2dDebug=1`，确认开发面板显示动作目录、原生内容开关、背景开关和表达式资源状态；角色点击头部/身体应触发 `touch_head`/`touch_body` 等动作，当前 Shimakaze 无 `Expressions` 时表情按钮应禁用。移除 `live2dNativeContent=1` 后应恢复 skin-only。
 4. 通过 Wallpaper Engine 的 `importnativecontent` 属性切换为 `true`。预期原生入口重新加载，模型自带场景层恢复，动作目录可由运行时消费；关闭后应回到 skin-only 入口并停止原生动作。
 5. 显式打开 `?live2dDebug=1` 只能看到开发状态面板；它不会恢复桌面动作按钮，也不属于用户设置页。
 6. 将 `live2dCoreUrl` 指向不存在的回环 `.js` 时，预期状态为 `Live2D model unavailable`，原生 canvas 被清理，Companion/冻结的 3D 页面不因此中断。
+7. 对一个没有历史校准的新模型完成保存：首次 GET 应为 404，但 POST 端点必须存在；成功后模型自动重新加载，文件出现在每用户 Rayure 状态目录，模型目录不产生/修改 `rayure.calibration.json`。模拟 POST 失败时向导必须保持打开并显示错误。
 
 ## 资源与 CEF 边界
 

@@ -2,14 +2,38 @@
 
 本项目的所有重要变更都会记录在此文件中。
 
-## [Unreleased] - 2026-08-25
+## [Unreleased] - 2026-08-26
 
-### 本次收尾记录
+### 恢复性审计与修复
 
-- 已将当前 Live2D/ARDY 接入代码、协议、Companion、调试页和对应测试保存在本次提交；原生 Cubism 模型加载、原生动作/表达式分流和 Canonical Motion 播放链路已经接线；
-- 当前岛风 model3 实测有 545 个参数，腿脚和部分手臂使用 `Param7/8/9/10/11/12/14/15/16/17/19/79/80/86/286` 等非标准 ID。代码已加入显式 Shimakaze RigProfile，但尚未完成通用 DisplayInfo 导入、自动校准和任意新模型的自动映射；
+#### 修复
+
+- 修复首次标定没有 `calibrationUrl`、实际上无法保存的问题：Companion 现在为已配置本地状态路径的 Live2D 模型始终发布固定的 tokenized 校准端点，文件不存在时 GET 返回 404，POST 成功后立即可读；
+- 修复标定向导忽略 POST 状态却提前关闭并写入浏览器“已保存”标记的问题：只有 Companion 返回成功才关闭向导并重新加载模型，HTTP/网络失败会留在当前步骤显示错误，连击由保存状态隔离；
+- 修复手工选择参数后把模型真实范围丢弃、统一写成 `-30..30 / neutral=0` 的问题；映射现在保留模型给出的 min/max/default，并拒绝非有限、倒置、重复或越界范围；
+- 修复标定向导“场景部件”步骤没有进入协议、因而无法持久化的问题；`skinHiddenPartIds` 现在支持包括空列表在内的严格往返，并优先于自动识别/本地配置；
+- 修复向导重绘后“收起”按钮仍引用旧 DOM、任何步骤切换后失效的问题，并加入“稍后”退出与会话级抑制，退出/保存都会重新创建干净的模型表面；
+- 修复动作尾部回中混合只到 `10/11`、仍残留姿势的问题；最终帧现在精确到达相对中性姿势，同时保留动作结束时的根位置；
+- 修复分片语义缓存把包含 `:` 或超长前缀的合法 wire cache key 直接用于 Windows 文件名的问题；不安全前缀统一进入 `misc` 分片。
+
+#### 架构边界
+
+- 校准数据从模型目录迁移到每用户 Rayure 状态目录（Windows 默认 `%LOCALAPPDATA%\Rayure\calibrations`）；模型旁旧 `rayure.calibration.json` 仅兼容读取，新保存不再修改私有/购买模型目录；写入采用同目录临时文件原子替换；
+- ARDY 3D/CoreSkin/PMX 调试表面改为仅在 Vite 开发环境动态导入，不再静态进入 Wallpaper 生产包；Vite `/@fs/` 不再开放整个 `scratch`，调试资产只允许固定单文件路由与 `.json`/`.pmx` 白名单；
+- `scripts/verify.ps1` 新增开发期 3D 运行时代码不得进入 `dist` 的产物门禁。
+
+#### 验证
+
+- `scripts/verify.ps1 -SkipInstall` 通过：Protocol 26、Companion 148、Wallpaper 91，共 265 项测试全绿；TypeScript 检查、Python Bridge 编译、Wallpaper 生产构建、生产依赖审计和私有资源门禁均通过；
+- 生产入口恢复为约 114 kB，冻结的 MMD 主机保持独立懒加载分块；生产 JS 不包含 ARDY 3D/CoreSkin 调试故障文案；
+- 本轮未运行真实私有 Live2D 模型或 Wallpaper Engine CEF，因此向导画面、可见步态、DevTools、暂停/恢复和页面重载仍是独立验收项。
+
+### 未关闭的运行验收
+
+- 原生 Cubism 模型加载、原生动作/表达式分流、Canonical Motion 播放和四步手工校准链路已经接线；自动化只覆盖合同与失败边界，不等于模型画面验收；
+- 当前岛风 model3 的既有审计记录为 545 个参数，腿脚和部分手臂使用 `Param7/8/9/10/11/12/14/15/16/17/19/79/80/86/286` 等非标准 ID。代码已有显式 Shimakaze RigProfile 和保留模型真实范围的手工向导，但尚未从 DisplayInfo 自动理解任意新模型的参数语义；
 - `walk.forward` 可以由 Companion 生成并发布，浏览器面板也能收到 `completed`，但本次停止前没有通过画面验收确认腿脚形成可见步态；根位移只是 2D 预览投影，不能替代模型参数映射；
-- 下一次继续时应先补齐“模型参数定义/DisplayInfo → RigProfile → 映射/缺失诊断 → 逐模型校准”，再在 Wallpaper Engine CEF 中复核真实播放；
+- 下一次继续时应先用真实模型完成向导首次保存/失败恢复和可见动作复核，再在 Wallpaper Engine CEF 中验证画面、DevTools、暂停/恢复与重载；通用 DisplayInfo 语义导入仍是后续能力，不冒充本轮完成项；
 - 私有模型、动作、临时 JSON 和调试截图继续留在工作区/忽略路径，未纳入 Git、`public/`、`dist/` 或发布包。
 
 ### 新增
@@ -37,7 +61,7 @@
 - 新增 Live2D 原生 `Expressions` 接入：skin-only 入口保留表达式资源并启用 Cubism expression manager，支持文件名/路径及中英日语义别名解析；`expression.set/reset` 与带表达式的 `emote.play` 会分流到原生表面，未知表情安全降级；协议的零权重表示重置，正权重触发原生 exp3，具体权重与过渡时序由模型自带 Cubism fade 控制；
 - 新增 Live2D `skinHiddenPartIds` 配置与 `cdi3.json` 场景部件保守识别：可隐藏背景、镜子、地板、粒子等 drawable/part，同时把模型本体保留为 Rayure 的伴侣皮套；
 - 新增 Wallpaper Engine 属性：默认隐藏品牌和连接状态，可在属性面板导入模型自带动作/场景层；
-- 新增浏览器 Live2D 预览交互：回环开发页默认加载原生动作但隐藏模型场景层，点击角色头部/身体会按模型动作组触发 `touch_head`/`touch_body`，`?live2dDebug=1` 提供背景、原生动作、场景层、表情和动作目录控制；
+- 新增浏览器 Live2D 预览交互：回环开发页与 Wallpaper Engine 默认均为 skin-only；显式 `?live2dNativeContent=1` 后，点击角色头部/身体可按模型动作组触发 `touch_head`/`touch_body`，`?live2dDebug=1` 提供背景、原生动作、场景层、表情和动作目录控制；
 - 新增仅在 `?live2dDebug=1` 显示的 ARDY 生成控制：支持输入动作描述、挥手/走路缓存预设、通过回环 WebSocket 请求 `MotionGenerationController`，并展示接受、失败、发布和播放状态；
 
 ### 变更

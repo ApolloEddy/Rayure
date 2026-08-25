@@ -63,7 +63,7 @@ flowchart LR
 - Renderer 与 Companion 的能力协商；
 - 后续所有特权消息的认证与显式能力声明。
 
-M1 允许 `client.hello → server.welcome/server.error → model.available`。`model.available` 只包含模型标识、显示名、格式和一次性回环 URL；Live2D 还可带一个只在显式导入时使用的原生入口 URL，以及默认皮套模式隐藏的 part ID 列表；磁盘路径始终留在 Companion。Live2D 默认入口会省略模型原生 `Motions`，模型自带动作和场景层不会在默认加载阶段进入 Renderer。当前模型通道通过高熵会话令牌、Origin、GET/HEAD、扩展名白名单、大小限制和 realpath 边界收敛为只读能力。摄像头、麦克风、执行和供应商凭据等更高权限消息进入协议前，仍必须完成持久配对设计和威胁测试。
+M1 允许 `client.hello → server.welcome/server.error → model.available`。`model.available` 只包含模型标识、显示名、格式和一次性回环 URL；Live2D 还可带一个只在显式导入时使用的原生入口 URL、默认皮套模式隐藏的 part ID，以及固定文件名的校准状态 URL；磁盘路径始终留在 Companion。模型资源通道继续通过高熵令牌、Origin、GET/HEAD、扩展名白名单、大小限制和 realpath 边界保持只读。校准是独立窄写能力：只接受当前 Live2D token 的 `rayure.calibration.json` POST，严格校验后写入每用户 Rayure 状态目录，不写模型树。摄像头、麦克风、执行和供应商凭据等更高权限消息进入协议前，仍必须完成持久配对设计和威胁测试。
 
 ## 3. Wallpaper Engine 宿主约束
 
@@ -104,6 +104,7 @@ Companion reads ignored rayure.local.json
 ```text
 Companion reads ignored Live2D model3 config
   → tokenized read-only model/motion/resource URLs
+  → tokenized calibration URL backed by per-user Rayure state (model tree remains read-only)
   → Wallpaper validates model3 manifest
   → resolveLive2dCoreUrl accepts fixed official/same-origin/loopback JS only
   → preloads Cubism Core and surfaces script failures

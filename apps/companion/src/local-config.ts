@@ -14,6 +14,7 @@ import {
   validateArdyProcessTimeout,
 } from './ardy-process-client.ts'
 import type { CompanionModelSource, CompanionMotionSource } from './model-source.ts'
+import { resolveModelCalibrationFilePath } from './model-calibration-store.ts'
 import {
   validateVisionProcessArgs,
   validateVisionProcessCommand,
@@ -146,6 +147,8 @@ export interface RayureMotionGeneratePreset {
 
 export interface LoadLocalConfigOptions {
   optional?: boolean | undefined
+  /** Test/embedding override for generated local state. */
+  stateRoot?: string | undefined
 }
 
 export async function loadLocalConfig(
@@ -208,12 +211,17 @@ export async function loadLocalConfig(
       const entryFilePath = await realpath(configuredPath)
       const metadata = await stat(entryFilePath)
       if (!metadata.isFile()) throw new Error('path is not a regular file')
+      const calibrationFilePath = resolveModelCalibrationFilePath(
+        { id, format, entryFilePath },
+        { ...(options.stateRoot === undefined ? {} : { stateRoot: options.stateRoot }) },
+      )
       resolvedModel = {
         id,
         displayName,
         format,
         entryFilePath,
         ...(skinHiddenPartIds === undefined ? {} : { skinHiddenPartIds }),
+        ...(calibrationFilePath === undefined ? {} : { calibrationFilePath }),
       }
     }
     catch (cause) {

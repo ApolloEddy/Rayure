@@ -17,9 +17,11 @@ import {
 import { createCompanionServer } from '../src/server.ts'
 import { ARDY_CORE_JOINT_NAMES, convertArdyMotion } from '../src/ardy-motion-adapter.ts'
 
-test('a Live2D model with a calibration file serves it and accepts a POST save', async (t) => {
+test('a new Live2D model advertises a calibration endpoint and saves outside the asset tree', async (t) => {
   const assetRoot = await mkdtemp(join(tmpdir(), 'rayure-calibration-assets-'))
+  const stateRoot = await mkdtemp(join(tmpdir(), 'rayure-calibration-state-'))
   t.after(() => rm(assetRoot, { recursive: true, force: true }))
+  t.after(() => rm(stateRoot, { recursive: true, force: true }))
   await mkdir(join(assetRoot, 'tex'))
   const modelBytes = Buffer.from(JSON.stringify({ Version: 3, FileReferences: {} }))
   const mocBytes = Buffer.from([0x4d, 0x4f, 0x43, 0x33])
@@ -27,12 +29,7 @@ test('a Live2D model with a calibration file serves it and accepts a POST save',
   await writeFile(join(assetRoot, 'M.model3.json'), modelBytes)
   await writeFile(join(assetRoot, 'M.moc3'), mocBytes)
   await writeFile(join(assetRoot, 'tex', 'texture_00.png'), textureBytes)
-  const calibration = {
-    profileId: 'test-calibration-profile',
-    parameters: [{ parameterId: 'ParamAngleX', control: 'headYaw', min: -30, max: 30, neutral: 0 }],
-    neutralPose: { ParamAngleX: 0 },
-  }
-  await writeFile(join(assetRoot, 'rayure.calibration.json'), Buffer.from(JSON.stringify(calibration)))
+  const calibrationFilePath = join(stateRoot, 'cal-debug.json')
 
   const server = createCompanionServer({
     port: 0,
@@ -43,6 +40,7 @@ test('a Live2D model with a calibration file serves it and accepts a POST save',
       displayName: 'Calibration debug',
       format: 'live2d',
       entryFilePath: join(assetRoot, 'M.model3.json'),
+      calibrationFilePath,
     },
   })
   const address = await server.start()
@@ -66,13 +64,13 @@ test('a Live2D model with a calibration file serves it and accepts a POST save',
   const calibrationUrl = model.calibrationUrl!
 
   const served = await fetch(calibrationUrl, { cache: 'no-store', credentials: 'omit' })
-  assert.equal(served.status, 200)
-  assert.deepEqual(JSON.parse(await served.text()), calibration)
+  assert.equal(served.status, 404)
 
   const updated = {
     profileId: 'test-calibration-profile',
     parameters: [{ parameterId: 'ParamAngleX', control: 'headYaw', min: -30, max: 30, neutral: 12 }],
     neutralPose: { ParamAngleX: 12 },
+    skinHiddenPartIds: [],
   }
   const save = await fetch(calibrationUrl, {
     method: 'POST',
@@ -84,12 +82,28 @@ test('a Live2D model with a calibration file serves it and accepts a POST save',
   const reloaded = await fetch(calibrationUrl, { cache: 'no-store', credentials: 'omit' })
   assert.equal(reloaded.status, 200)
   assert.deepEqual(JSON.parse(await reloaded.text()), updated)
-  assert.deepEqual(JSON.parse(await readFile(join(assetRoot, 'rayure.calibration.json'), 'utf8')), updated)
+  assert.deepEqual(JSON.parse(await readFile(calibrationFilePath, 'utf8')), updated)
+  await assert.rejects(readFile(join(assetRoot, 'rayure.calibration.json'), 'utf8'), /ENOENT/u)
+
+  const replacement = {
+    ...updated,
+    parameters: [{ ...updated.parameters[0], neutral: -6 }],
+    neutralPose: { ParamAngleX: -6 },
+  }
+  const replace = await fetch(calibrationUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(replacement),
+  })
+  assert.equal(replace.status, 204)
+  assert.deepEqual(JSON.parse(await readFile(calibrationFilePath, 'utf8')), replacement)
 })
 
 test('calibration POST rejects invalid payloads and non-Live2D assets', async (t) => {
   const assetRoot = await mkdtemp(join(tmpdir(), 'rayure-calibration-reject-'))
+  const stateRoot = await mkdtemp(join(tmpdir(), 'rayure-calibration-reject-state-'))
   t.after(() => rm(assetRoot, { recursive: true, force: true }))
+  t.after(() => rm(stateRoot, { recursive: true, force: true }))
   const modelBytes = Buffer.from(JSON.stringify({ Version: 3, FileReferences: {} }))
   const mocBytes = Buffer.from([0x4d, 0x4f, 0x43, 0x33])
   await writeFile(join(assetRoot, 'M.model3.json'), modelBytes)
@@ -104,6 +118,7 @@ test('calibration POST rejects invalid payloads and non-Live2D assets', async (t
       displayName: 'Calibration reject',
       format: 'live2d',
       entryFilePath: join(assetRoot, 'M.model3.json'),
+      calibrationFilePath: join(stateRoot, 'cal-reject.json'),
     },
   })
   const address = await server.start()

@@ -23,8 +23,7 @@ import {
 import type { Live2dNativeSnapshot } from './live2d/native-surface.ts'
 import { resolveLive2dCoreUrl } from './live2d/core-source.ts'
 import { buildCalibratedRigProfile, calibrationNeutralPose, resolveLive2dRigProfile } from './live2d/rig-profile.ts'
-import { Ardy3dDebugSurface } from './ardy3d/three-js-debug-surface.ts'
-import type { Ardy3dDebugSnapshot } from './ardy3d/three-js-debug-surface.ts'
+import type { Ardy3dDebugSnapshot, Ardy3dDebugSurface } from './ardy3d/three-js-debug-surface.ts'
 import { missingCalibrationControls } from './live2d/calibration-core.ts'
 import { CalibrationWizard } from './live2d/calibration-wizard.ts'
 import type { WallpaperPropertyListener } from './wallpaper-api.ts'
@@ -53,7 +52,7 @@ let live2dDebugBackdropVisible = debugQuery.get('backdrop') === '1'
 // ARDY 3D debug surface: `?3dDebug=1` fills the stage with a WebGL view driving
 // the same generated Canonical Motion on the official ARDY CoreSkin mannequin
 // (an alternative PMX only loads through an explicit `?3dModelUrl=`).
-const ardy3dDebugEnabled = debugQuery.get('3dDebug') === '1'
+const ardy3dDebugEnabled = import.meta.env.DEV && debugQuery.get('3dDebug') === '1'
 const ardy3dModelUrlOverride = parseLocal3dDebugUrl(debugQuery.get('3dModelUrl'))
 // 3D debug is a dedicated view: the 3D surface fills the stage and the
 // diagnostics panel docks to the left so neither covers the rig.  The attribute
@@ -103,6 +102,7 @@ const live2dQuerySurface = live2dNativeModelUrl === undefined || ardy3dDebugEnab
   })
 let live2dCompanionSurface: Live2dNativeSurface | undefined
 let calibrationWizard: CalibrationWizard | undefined
+const dismissedCalibrationKeys = new Set<string>()
 let live2dCompanionGeneration = 0
 let live2dCompanionModel: ModelDescriptor | undefined
 let live2dCompanionMotionCatalog: readonly Live2dMotionDescriptor[] = []
@@ -136,7 +136,7 @@ const companion = new CompanionClient({
     scene.updateMotionCatalog(motions.filter(motion => motion.format === 'vmd'))
   },
   onMotionPublished: (motion) => {
-    calibrationWizard?.reportMotionPublished(motion.displayName)
+    calibrationWizard?.reportMotionPublished(motion.id, motion.displayName)
     void handleMotionPublished(motion)
   },
   onMotionGenerateStatus: (status) => {
@@ -261,6 +261,8 @@ companion.start()
 
 window.addEventListener('beforeunload', () => {
   companion.stop()
+  calibrationWizard?.close()
+  calibrationWizard = undefined
   speechPublishedGeneration += 1
   speechPlayer?.dispose()
   speechPlayer = undefined
@@ -308,21 +310,25 @@ async function loadLive2dCompanionSurface(model: ModelDescriptor): Promise<void>
   const generation = ++live2dCompanionGeneration
   motionPublishedGeneration += 1
   pendingLive2dMotion = undefined
+  calibrationWizard?.close()
+  calibrationWizard = undefined
   live2dCompanionSurface?.dispose()
   let latestSnapshot: Live2dNativeSnapshot | undefined
   const calibration = model.calibrationUrl === undefined
     ? undefined
     : await fetchLive2dCalibration(model.calibrationUrl)
+  const skinHiddenPartIds = calibration?.skinHiddenPartIds ?? model.skinHiddenPartIds
+  const neutralPose = calibration === undefined ? undefined : calibrationNeutralPose(calibration)
   const surface = new Live2dNativeSurface(stage, {
     modelUrl: resolveLive2dCompanionModelUrl(model),
     ...(live2dCoreUrl === undefined ? {} : { coreUrl: live2dCoreUrl }),
     debugFallback: false,
-    ...(model.skinHiddenPartIds === undefined ? {} : { skinHiddenPartIds: model.skinHiddenPartIds }),
+    ...(skinHiddenPartIds === undefined ? {} : { skinHiddenPartIds }),
     ...(calibration === undefined
       ? {}
       : {
           rigProfile: buildCalibratedRigProfile(calibration),
-          ...(calibrationNeutralPose(calibration) === undefined ? {} : { neutralPose: calibrationNeutralPose(calibration)! }),
+          ...(neutralPose === undefined ? {} : { neutralPose }),
         }),
     showNativeParts: live2dNativeContentEnabled && live2dNativeSceneVisible,
     onSnapshot: (snapshot) => {
@@ -377,25 +383,33 @@ function maybeOpenCalibrationWizard(
 ): void {
   if (model.format !== 'live2d') return
   const force = debugQuery.get('calibrate') === '1'
+  const sessionKey = model.calibrationUrl ?? model.id
   if (!force && model.calibrationUrl !== undefined && calibration !== undefined) return
-  if (!force && localStorage.getItem(`rayure-calibrated-${model.id}`) === '1') return
+  if (!force && dismissedCalibrationKeys.has(sessionKey)) return
   const ranges = surface.getParameterRanges()
   if (ranges.length === 0) return
   const parameterIds = ranges.map(range => range.id)
   const baseProfile = calibration !== undefined
     ? buildCalibratedRigProfile(calibration)
     : resolveLive2dRigProfile(parameterIds)
+  const skinHiddenPartIds = calibration?.skinHiddenPartIds ?? model.skinHiddenPartIds
   if (!force && missingCalibrationControls(baseProfile).length === 0) return
   const wizard = new CalibrationWizard({
     surface,
     baseProfile,
-    ...(model.skinHiddenPartIds === undefined ? {} : { initialSkinHiddenPartIds: model.skinHiddenPartIds }),
+    ...(skinHiddenPartIds === undefined ? {} : { initialSkinHiddenPartIds: skinHiddenPartIds }),
     ...(calibration?.neutralPose === undefined ? {} : { initialNeutralPose: calibration.neutralPose }),
     ...(calibration?.disabledControls === undefined ? {} : { initialDisabledControls: calibration.disabledControls }),
     ...(model.calibrationUrl === undefined ? {} : { calibrationUrl: model.calibrationUrl }),
     modelId: model.id,
     onSaved: () => {
-      localStorage.setItem(`rayure-calibrated-${model.id}`, '1')
+      calibrationWizard = undefined
+      void loadLive2dCompanionSurface(model)
+    },
+    onDismissed: () => {
+      dismissedCalibrationKeys.add(sessionKey)
+      calibrationWizard = undefined
+      void loadLive2dCompanionSurface(model)
     },
     onRequestMotionGeneration: prompt => companion.requestMotionGeneration({ prompt }),
   })
@@ -978,6 +992,8 @@ function renderArdy3dGeneratedMotionPlayback(observation: {
 }
 
 async function maybeStartArdy3dSurface(): Promise<void> {
+  if (!ardy3dDebugEnabled || ardy3dSurface !== undefined) return
+  const { Ardy3dDebugSurface } = await import('./ardy3d/three-js-debug-surface.ts')
   if (!ardy3dDebugEnabled || ardy3dSurface !== undefined) return
   const modelUrl = resolveArdy3dModelUrl()
   const surface = new Ardy3dDebugSurface(stage, {

@@ -160,6 +160,8 @@ export interface Live2dCalibrationDescriptor {
   disabledControls?: readonly string[]
   /** Parameter-id → value snapshot of the model's calibrated initial pose. */
   neutralPose?: Readonly<Record<string, number>>
+  /** Character-source parts hidden in Rayure's skin-only view; an empty list is meaningful. */
+  skinHiddenPartIds?: readonly string[]
 }
 
 export interface ServerModelAvailableMessage {
@@ -994,6 +996,7 @@ function requireLive2dCalibration(value: unknown): Live2dCalibrationDescriptor {
   const expectedKeys = ['profileId', 'parameters']
   if (root.disabledControls !== undefined) expectedKeys.push('disabledControls')
   if (root.neutralPose !== undefined) expectedKeys.push('neutralPose')
+  if (root.skinHiddenPartIds !== undefined) expectedKeys.push('skinHiddenPartIds')
   requireExactKeys(root, expectedKeys, 'live2d calibration')
   const profileId = requireDisplayString(root.profileId, 'live2d calibration profileId', 64)
   if (!Array.isArray(root.parameters) || root.parameters.length === 0 || root.parameters.length > 128) {
@@ -1045,11 +1048,15 @@ function requireLive2dCalibration(value: unknown): Live2dCalibrationDescriptor {
   const neutralPose = root.neutralPose === undefined
     ? undefined
     : requireNumberRecord(root.neutralPose, 'live2d calibration neutralPose', 512)
+  const skinHiddenPartIds = root.skinHiddenPartIds === undefined
+    ? undefined
+    : requireSkinHiddenPartIds(root.skinHiddenPartIds, 'live2d calibration skinHiddenPartIds')
   return {
     profileId,
     parameters,
     ...(disabledControls === undefined ? {} : { disabledControls }),
     ...(neutralPose === undefined ? {} : { neutralPose }),
+    ...(skinHiddenPartIds === undefined ? {} : { skinHiddenPartIds }),
   }
 }
 
@@ -1111,9 +1118,9 @@ function requireNumberRecord(value: unknown, label: string, maxEntries: number):
   return result
 }
 
-function requireSkinHiddenPartIds(value: unknown): readonly string[] {
+function requireSkinHiddenPartIds(value: unknown, label = 'model skinHiddenPartIds'): readonly string[] {
   if (!Array.isArray(value) || value.length > 512) {
-    throw new ProtocolValidationError('model skinHiddenPartIds must contain at most 512 entries')
+    throw new ProtocolValidationError(`${label} must contain at most 512 entries`)
   }
   const ids = value.map((entry, index) => {
     if (
@@ -1123,12 +1130,12 @@ function requireSkinHiddenPartIds(value: unknown): readonly string[] {
       || entry.trim() !== entry
       || /[\u0000-\u001F\u007F]/u.test(entry)
     ) {
-      throw new ProtocolValidationError(`model skinHiddenPartIds[${index}] must be a trimmed printable identifier`)
+      throw new ProtocolValidationError(`${label}[${index}] must be a trimmed printable identifier`)
     }
     return entry
   })
   if (new Set(ids).size !== ids.length) {
-    throw new ProtocolValidationError('model skinHiddenPartIds must not contain duplicates')
+    throw new ProtocolValidationError(`${label} must not contain duplicates`)
   }
   return ids
 }

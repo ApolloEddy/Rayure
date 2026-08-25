@@ -11,6 +11,7 @@ import {
   LIVE2D_CONTROL_VALUES,
 } from './rig-profile.ts'
 import {
+  createCalibrationBinding,
   missingCalibrationControls,
   serializeCalibration,
 } from './calibration-core.ts'
@@ -25,6 +26,7 @@ export interface CalibrationWizardOptions {
   calibrationUrl?: string
   modelId: string
   onSaved?: (calibration: Live2dCalibrationDescriptor) => void
+  onDismissed?: () => void
   /**
    * Sends an ARDY generation request so the model plays a full motion and the
    * user can verify the channel mapping visually. Returns a request id, or
@@ -97,10 +99,10 @@ export class CalibrationWizard {
   readonly #calibrationUrl: string | undefined
   readonly #modelId: string
   readonly #onSaved: ((calibration: Live2dCalibrationDescriptor) => void) | undefined
+  readonly #onDismissed: (() => void) | undefined
   readonly #onRequestMotionGeneration: ((prompt: string) => string | false) | undefined
   readonly #state: WizardState
   #root: HTMLElement | undefined
-  #toggle: HTMLButtonElement | undefined
   #step = 1
   #ranges: readonly Live2dParameterRange[] = []
   #usedParameterIds = new Set<string>()
@@ -110,6 +112,8 @@ export class CalibrationWizard {
   #verifyRequestId: string | undefined
   #verifyStatus: HTMLElement | undefined
   #verifyTimeout: number | undefined
+  #saving = false
+  #saveError: string | undefined
 
   constructor(options: CalibrationWizardOptions) {
     this.#surface = options.surface
@@ -117,6 +121,7 @@ export class CalibrationWizard {
     this.#calibrationUrl = options.calibrationUrl
     this.#modelId = options.modelId
     this.#onSaved = options.onSaved
+    this.#onDismissed = options.onDismissed
     this.#onRequestMotionGeneration = options.onRequestMotionGeneration
     this.#state = {
       profile: {
@@ -125,7 +130,7 @@ export class CalibrationWizard {
         parameters: [...options.baseProfile.parameters],
       },
       disabledControls: new Set(options.initialDisabledControls ?? []),
-      skinHiddenPartIds: [...(options.initialSkinHiddenPartIds ?? [])],
+      skinHiddenPartIds: [...new Set(options.initialSkinHiddenPartIds ?? [])],
       neutralPose: options.initialNeutralPose,
     }
   }
@@ -142,11 +147,19 @@ export class CalibrationWizard {
   close(): void {
     if (this.#disposed) return
     this.#disposed = true
+    this.#trialGeneration += 1
     this.#clearVerifyTimeout()
     this.#verifyRequestId = undefined
     this.#verifyStatus = undefined
     this.#root?.remove()
     this.#root = undefined
+  }
+
+  #dismiss(): void {
+    if (this.#disposed || this.#saving) return
+    const onDismissed = this.#onDismissed
+    this.close()
+    onDismissed?.()
   }
 
   #build(): void {
@@ -159,8 +172,7 @@ export class CalibrationWizard {
     panel.style.cssText = 'pointer-events:auto;width:min(420px,94vw);max-height:96vh;overflow:auto;background:rgba(26,26,32,0.94);border-left:1px solid rgba(255,255,255,0.12);padding:16px;'
     const stepContent = this.#buildStepContent()
     const header = this.#buildHeader()
-    this.#toggle = this.#buildCollapseToggle(panel, stepContent)
-    header.append(this.#toggle)
+    header.append(this.#buildCollapseToggle(panel, stepContent))
     panel.append(header, stepContent)
     root.append(panel)
     document.body.append(root)
@@ -206,7 +218,10 @@ export class CalibrationWizard {
       chip.textContent = i === 1 ? '① 通道' : i === 2 ? '② 部件' : i === 3 ? '③ 姿势' : '④ 保存'
       steps.append(chip)
     }
-    header.append(title, steps)
+    const dismiss = button('稍后', () => this.#dismiss())
+    dismiss.disabled = this.#saving
+    dismiss.title = '放弃本次未保存修改并恢复已保存的模型状态'
+    header.append(title, steps, dismiss)
     return header
   }
 
@@ -238,9 +253,11 @@ export class CalibrationWizard {
         this.#rerender()
       }
       else {
-        this.#save()
+        void this.#save()
       }
     })
+    next.disabled = this.#saving
+    if (this.#step === 4 && this.#saving) next.textContent = '正在保存…'
     nav.append(back, next)
     return nav
   }
@@ -249,9 +266,10 @@ export class CalibrationWizard {
     const panel = this.#root?.firstElementChild as HTMLElement | undefined
     if (panel === undefined) return
     panel.innerHTML = ''
+    const stepContent = this.#buildStepContent()
     const header = this.#buildHeader()
-    if (this.#toggle !== undefined) header.append(this.#toggle)
-    panel.append(header, this.#buildStepContent())
+    header.append(this.#buildCollapseToggle(panel, stepContent))
+    panel.append(header, stepContent)
     this.#updateStepChips(panel)
   }
 
@@ -304,6 +322,7 @@ export class CalibrationWizard {
     const candidates = this.#ranges.filter(range => !this.#usedParameterIds.has(range.id))
     const search = document.createElement('input')
     search.type = 'text'
+    search.maxLength = 128
     search.placeholder = '搜索参数名…'
     search.style.cssText = 'flex:0 1 120px;min-width:0;background:#1e1e24;color:#e5e5e5;border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:4px 6px;font-size:12px;'
     const select = document.createElement('select')
@@ -371,14 +390,10 @@ export class CalibrationWizard {
 
   #bindParameter(control: Live2dControl, parameterId: string): void {
     if (!parameterId) return
-    this.#surface.previewParameter(parameterId, 0)
-    this.#state.profile.parameters.push({
-      parameterId,
-      control,
-      min: -30,
-      max: 30,
-      neutral: 0,
-    })
+    const range = this.#ranges.find(candidate => candidate.id === parameterId)
+    if (range === undefined) return
+    this.#surface.previewParameter(parameterId, range.defaultValue)
+    this.#state.profile.parameters.push(createCalibrationBinding(control, range))
     this.#usedParameterIds.add(parameterId)
     this.#pendingChannel = undefined
     this.#rerender()
@@ -717,9 +732,9 @@ export class CalibrationWizard {
     }
   }
 
-  /** Reflects a companion motion.published event into the verify block. */
-  reportMotionPublished(displayName: string): void {
-    if (this.#verifyRequestId === undefined) return
+  /** Reflects only this wizard request's motion.published event into the verify block. */
+  reportMotionPublished(motionId: string, displayName: string): void {
+    if (this.#verifyRequestId === undefined || !motionId.startsWith(`${this.#verifyRequestId}-`)) return
     this.#clearVerifyTimeout()
     if (this.#verifyStatus !== undefined) {
       this.#verifyStatus.textContent = `✓ 动作已生成并开始播放（${displayName}）· 播放结束模型回到初始姿势`
@@ -774,35 +789,64 @@ export class CalibrationWizard {
     const hint = document.createElement('div')
     hint.style.cssText = 'font-size:12px;color:#a1a1aa;'
     hint.textContent = this.#calibrationUrl === undefined
-      ? '未连接 Companion，校准将只保留在当前页面。'
-      : '保存后需刷新页面让新校准生效。'
+      ? 'Companion 未提供可写校准端点；当前结果不能安全保存。'
+      : '保存成功后会从本机 Rayure 状态目录重新加载，不会修改模型文件。'
     wrap.append(hint)
+    if (this.#saveError !== undefined) {
+      const error = document.createElement('div')
+      error.style.cssText = 'font-size:12px;color:#F87454;white-space:pre-wrap;'
+      error.textContent = this.#saveError
+      wrap.append(error)
+    }
     return wrap
   }
 
-  #save(): void {
+  async #save(): Promise<void> {
+    if (this.#saving || this.#disposed) return
+    if (this.#calibrationUrl === undefined) {
+      this.#saveError = '无法保存：Companion 没有提供校准端点。请检查本机配置后重试。'
+      this.#rerender()
+      return
+    }
     const calibration = serializeCalibration(
       this.#state.profile,
       [...this.#state.disabledControls],
       this.#state.neutralPose,
+      this.#state.skinHiddenPartIds,
     )
-    if (this.#calibrationUrl !== undefined) {
-      void this.#postCalibration(calibration)
+    this.#saving = true
+    this.#saveError = undefined
+    this.#rerender()
+    try {
+      await this.#postCalibration(calibration)
+      if (this.#disposed) return
+      const onSaved = this.#onSaved
+      this.close()
+      onSaved?.(calibration)
     }
-    this.#onSaved?.(calibration)
-    this.close()
+    catch (cause) {
+      if (this.#disposed) return
+      this.#saving = false
+      this.#saveError = cause instanceof Error ? cause.message : '校准保存失败'
+      this.#rerender()
+    }
   }
 
   async #postCalibration(calibration: Live2dCalibrationDescriptor): Promise<void> {
     try {
-      await fetch(this.#calibrationUrl!, {
+      const response = await fetch(this.#calibrationUrl!, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(calibration),
       })
+      if (!response.ok) {
+        const detail = (await response.text()).trim().slice(0, 160)
+        throw new Error(`校准保存失败（HTTP ${response.status}）${detail.length === 0 ? '' : `：${detail}`}`)
+      }
     }
-    catch {
-      // Saving is best-effort from the wizard; the page already shows the pose.
+    catch (cause) {
+      if (cause instanceof Error) throw cause
+      throw new Error('校准保存失败：无法连接 Companion')
     }
   }
 }
