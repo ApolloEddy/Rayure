@@ -1,6 +1,7 @@
 import './style.css'
 
 import type { CanonicalMotion, Live2dMotionDescriptor, ModelDescriptor, MotionDescriptor, SpeechDescriptor } from '@rayure/protocol'
+import { parseLive2dCalibration } from '@rayure/protocol'
 import { CompanionClient } from './companion-client.ts'
 import { loadCanonicalMotion } from './live2d/canonical-motion-client.ts'
 import type { CompanionConnectionSnapshot } from './companion-client.ts'
@@ -21,6 +22,9 @@ import {
 } from './live2d/native-surface.ts'
 import type { Live2dNativeSnapshot } from './live2d/native-surface.ts'
 import { resolveLive2dCoreUrl } from './live2d/core-source.ts'
+import { buildCalibratedRigProfile, calibrationNeutralPose, resolveLive2dRigProfile } from './live2d/rig-profile.ts'
+import { missingCalibrationControls } from './live2d/calibration-core.ts'
+import { CalibrationWizard } from './live2d/calibration-wizard.ts'
 import type { WallpaperPropertyListener } from './wallpaper-api.ts'
 import { SpeechPlayer } from './speech-player.ts'
 
@@ -36,16 +40,12 @@ const debugQuery = new URLSearchParams(window.location.search)
 const live2dParameterProbeEnabled = debugQuery.get('live2dDebug') === '1'
 const live2dNativeModelUrl = parseLocalLive2dDebugUrl(debugQuery.get('live2dModelUrl'))
 const live2dCoreUrl = resolveLive2dCoreUrl(debugQuery.get('live2dCoreUrl'), window.location.href)
-const loopbackBrowserPreview = window.location.protocol === 'http:'
-  && (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost')
-// The explicit developer preview should be useful out of the box: Shimakaze
-// exposes native motions but no exp3 expressions, so skin-only mode would be
-// visually indistinguishable from a static portrait. Production keeps the
-// skin-only default unless the query, local browser preview, or Wallpaper
-// Engine property opts in.
+// Native model content (bundled motions and scene layers) stays opt-in in
+// every runtime: Wallpaper Engine users enable it through the property panel
+// and browser/debug previews through ?live2dNativeContent=1. The developer
+// preview must show the same skin-only default users see in production.
 const nativeContentQuery = debugQuery.get('live2dNativeContent')
 let live2dNativeContentEnabled = nativeContentQuery === '1'
-  || (nativeContentQuery !== '0' && (live2dParameterProbeEnabled || loopbackBrowserPreview))
 let live2dNativeSceneVisible = debugQuery.get('live2dNativeScene') === '1'
 let live2dDebugBackdropVisible = debugQuery.get('backdrop') === '1'
 const live2dDiagnosticsPanel = createLive2dDiagnosticsPanel(live2dParameterProbeEnabled || live2dNativeModelUrl !== undefined)
@@ -278,11 +278,20 @@ async function loadLive2dCompanionSurface(model: ModelDescriptor): Promise<void>
   pendingLive2dMotion = undefined
   live2dCompanionSurface?.dispose()
   let latestSnapshot: Live2dNativeSnapshot | undefined
+  const calibration = model.calibrationUrl === undefined
+    ? undefined
+    : await fetchLive2dCalibration(model.calibrationUrl)
   const surface = new Live2dNativeSurface(stage, {
     modelUrl: resolveLive2dCompanionModelUrl(model),
     ...(live2dCoreUrl === undefined ? {} : { coreUrl: live2dCoreUrl }),
     debugFallback: false,
     ...(model.skinHiddenPartIds === undefined ? {} : { skinHiddenPartIds: model.skinHiddenPartIds }),
+    ...(calibration === undefined
+      ? {}
+      : {
+          rigProfile: buildCalibratedRigProfile(calibration),
+          ...(calibrationNeutralPose(calibration) === undefined ? {} : { neutralPose: calibrationNeutralPose(calibration)! }),
+        }),
     showNativeParts: live2dNativeContentEnabled && live2dNativeSceneVisible,
     onSnapshot: (snapshot) => {
       if (generation !== live2dCompanionGeneration) return
@@ -323,6 +332,38 @@ async function loadLive2dCompanionSurface(model: ModelDescriptor): Promise<void>
     void surface.playDefaultMotion()
   }
   applyPendingLive2dExpression(surface)
+  maybeOpenCalibrationWizard(surface, model, calibration)
+}
+
+function maybeOpenCalibrationWizard(
+  surface: Live2dNativeSurface,
+  model: ModelDescriptor,
+  calibration: import('@rayure/protocol').Live2dCalibrationDescriptor | undefined,
+): void {
+  if (model.format !== 'live2d') return
+  const force = debugQuery.get('calibrate') === '1'
+  if (!force && model.calibrationUrl !== undefined && calibration !== undefined) return
+  if (!force && localStorage.getItem(`rayure-calibrated-${model.id}`) === '1') return
+  const ranges = surface.getParameterRanges()
+  if (ranges.length === 0) return
+  const parameterIds = ranges.map(range => range.id)
+  const baseProfile = calibration !== undefined
+    ? buildCalibratedRigProfile(calibration)
+    : resolveLive2dRigProfile(parameterIds)
+  if (!force && missingCalibrationControls(baseProfile).length === 0) return
+  const wizard = new CalibrationWizard({
+    surface,
+    baseProfile,
+    ...(model.skinHiddenPartIds === undefined ? {} : { initialSkinHiddenPartIds: model.skinHiddenPartIds }),
+    ...(calibration?.neutralPose === undefined ? {} : { initialNeutralPose: calibration.neutralPose }),
+    ...(calibration?.disabledControls === undefined ? {} : { initialDisabledControls: calibration.disabledControls }),
+    ...(model.calibrationUrl === undefined ? {} : { calibrationUrl: model.calibrationUrl }),
+    modelId: model.id,
+    onSaved: () => {
+      localStorage.setItem(`rayure-calibrated-${model.id}`, '1')
+    },
+  })
+  wizard.open()
 }
 
 function requestLive2dExpression(expression: PendingLive2dExpression): boolean {
@@ -509,6 +550,42 @@ function resolveLive2dCompanionModelUrl(model: ModelDescriptor): string {
   return live2dNativeContentEnabled && model.nativeUrl !== undefined
     ? model.nativeUrl
     : model.url
+}
+
+/**
+ * Fetches the model's calibration descriptor from the tokenized loopback URL.
+ * A missing or invalid calibration file is a soft failure: the model still
+ * loads with the sentinel-based rig profile and its default pose.
+ */
+async function fetchLive2dCalibration(url: string): Promise<import('@rayure/protocol').Live2dCalibrationDescriptor | undefined> {
+  if (!isLoopbackAssetUrl(url)) return undefined
+  let response: Response
+  try {
+    response = await fetch(url, { cache: 'no-store', credentials: 'omit' })
+  }
+  catch {
+    return undefined
+  }
+  if (!response.ok) return undefined
+  try {
+    return parseLive2dCalibration(await response.json())
+  }
+  catch {
+    return undefined
+  }
+}
+
+function isLoopbackAssetUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:'
+      && (url.hostname === '127.0.0.1' || url.hostname === 'localhost')
+      && url.port.length > 0
+      && /^\/assets\/[A-Za-z0-9_-]{16,128}\/.+/u.test(url.pathname)
+  }
+  catch {
+    return false
+  }
 }
 
 function applyLive2dNativeContentPolicy(): void {

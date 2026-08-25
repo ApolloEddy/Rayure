@@ -11,6 +11,7 @@ import {
   Live2dParameterAdapter,
 } from './rig-profile.ts'
 import type {
+  Live2dNeutralPose,
   Live2dParameterSink,
   Live2dRigProfile,
 } from './rig-profile.ts'
@@ -29,9 +30,9 @@ export class Live2dMotionPlayer {
   #lastAppliedElapsedMs = -1
   #disposed = false
 
-  constructor(sink: Live2dParameterSink, profile?: Live2dRigProfile) {
+  constructor(sink: Live2dParameterSink, profile?: Live2dRigProfile, neutralPose?: Live2dNeutralPose) {
     this.#sink = sink
-    this.#adapter = new Live2dParameterAdapter(profile)
+    this.#adapter = new Live2dParameterAdapter(profile, neutralPose)
   }
 
   get isPlaying(): boolean {

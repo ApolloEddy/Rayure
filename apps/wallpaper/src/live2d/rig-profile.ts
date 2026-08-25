@@ -3,6 +3,7 @@ import type {
   CanonicalQuaternion,
   CanonicalVector3,
 } from '@rayure/protocol'
+import type { Live2dCalibrationDescriptor } from '@rayure/protocol'
 
 export type Live2dControl =
   | 'headYaw'
@@ -68,6 +69,13 @@ export interface Live2dParameterUpdate {
   control: Live2dControl
   value: number
 }
+
+/**
+ * Parameter-id → value snapshot of the model's calibrated initial pose.
+ * It replaces each binding's neutral value as the offset base so generated
+ * motions overlay on the calibrated pose instead of the binding default.
+ */
+export type Live2dNeutralPose = Readonly<Record<string, number>>
 
 export interface Live2dParameterSink {
   setParameterValue(parameterId: string, value: number): void
@@ -150,21 +158,112 @@ export const SHIMAKAZE_LIVE2D_RIG_PROFILE: Readonly<Live2dRigProfile> = {
   ],
 }
 
+/**
+ * Calibrated bindings for the external Ayanami 10 (lingbo_10) model used by
+ * the local Rayure preview.  It shares the bilibili Unity pipeline convention
+ * with Shimakaze for the lower body and right arm (Param2/Param4, Param7-19)
+ * but does not expose the generic ParamArmLA/RA ids, so the standard profile
+ * would drop all limb channels.  Its left arm is driven by the unnamed
+ * Param_Angle_Rotation* bone set and is not bound until visually calibrated.
+ */
+export const LINGBO10_LIVE2D_RIG_PROFILE: Readonly<Live2dRigProfile> = {
+  id: 'rayure-live2d-lingbo10-v1',
+  joints: STANDARD_LIVE2D_RIG_PROFILE.joints,
+  parameters: [
+    { parameterId: 'ParamAngleX', control: 'headYaw', min: -30, max: 30, neutral: 0 },
+    { parameterId: 'ParamAngleY', control: 'headPitch', min: -30, max: 30, neutral: 0 },
+    { parameterId: 'ParamAngleZ', control: 'headRoll', min: -30, max: 30, neutral: 0 },
+    { parameterId: 'ParamBodyAngleX', control: 'bodyYaw', min: -10, max: 10, neutral: 0 },
+    { parameterId: 'ParamBodyAngleY', control: 'bodyPitch', min: -10, max: 10, neutral: 0 },
+    { parameterId: 'ParamBodyAngleZ', control: 'bodyRoll', min: -10, max: 10, neutral: 0 },
+    // Right arm follows the Shimakaze convention (Param2 shoulder, Param4 elbow).
+    { parameterId: 'Param2', control: 'rightArmAngle', min: -90, max: 90, neutral: 0 },
+    { parameterId: 'Param4', control: 'rightElbowAngle', min: -20, max: 20, neutral: 0, scale: 0.8 },
+    // Lower body is a six-channel 2D rig matching the Shimakaze convention.
+    { parameterId: 'Param7', control: 'leftThighAngle', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param8', control: 'leftKneeBend', min: -12, max: 12, neutral: 0, scale: 0.65 },
+    { parameterId: 'Param9', control: 'leftFootAngle', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param10', control: 'leftThighDepth', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param11', control: 'leftKneeDepth', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param12', control: 'leftFootDepth', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param14', control: 'rightThighAngle', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param15', control: 'rightKneeBend', min: -12, max: 12, neutral: 0, scale: 0.65 },
+    { parameterId: 'Param16', control: 'rightFootAngle', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param17', control: 'rightThighDepth', min: -20, max: 20, neutral: 0, scale: 4 },
+    { parameterId: 'Param19', control: 'rightFootDepth', min: -20, max: 20, neutral: 0, scale: 4 },
+  ],
+}
+
 /** Select a model-specific profile only when its defining parameter ids exist. */
 export function resolveLive2dRigProfile(parameterIds: readonly string[]): Live2dRigProfile {
   const available = new Set(parameterIds)
   if (available.has('Param286') && available.has('Param7') && available.has('Param14')) {
     return SHIMAKAZE_LIVE2D_RIG_PROFILE
   }
+  if (available.has('Param_Angle_Rotation118') && available.has('Param7') && available.has('Param14')) {
+    return LINGBO10_LIVE2D_RIG_PROFILE
+  }
   return STANDARD_LIVE2D_RIG_PROFILE
+}
+
+export const LIVE2D_CONTROL_VALUES: readonly Live2dControl[] = [
+  'headYaw', 'headPitch', 'headRoll',
+  'bodyYaw', 'bodyPitch', 'bodyRoll',
+  'leftArmAngle', 'rightArmAngle', 'leftElbowAngle', 'rightElbowAngle',
+  'leftThighAngle', 'rightThighAngle', 'leftKneeBend', 'rightKneeBend',
+  'leftFootAngle', 'rightFootAngle',
+  'leftThighDepth', 'rightThighDepth', 'leftKneeDepth', 'rightKneeDepth',
+  'leftFootDepth', 'rightFootDepth',
+  'squat', 'legPhase',
+]
+
+export function isLive2dControl(value: string): value is Live2dControl {
+  return (LIVE2D_CONTROL_VALUES as readonly string[]).includes(value)
+}
+
+/**
+ * Builds a runtime rig profile from a companion calibration descriptor.
+ * Bindings whose control is unknown or disabled are skipped so an older or
+ * partially saved calibration degrades gracefully instead of misdriving.
+ */
+export function buildCalibratedRigProfile(calibration: Live2dCalibrationDescriptor): Live2dRigProfile {
+  const disabled = new Set(calibration.disabledControls ?? [])
+  const parameters: Live2dParameterBinding[] = []
+  for (const binding of calibration.parameters) {
+    if (!isLive2dControl(binding.control) || disabled.has(binding.control)) continue
+    parameters.push({
+      parameterId: binding.parameterId,
+      control: binding.control,
+      min: binding.min,
+      max: binding.max,
+      neutral: binding.neutral,
+      ...(binding.scale === undefined ? {} : { scale: binding.scale }),
+      ...(binding.invert === undefined ? {} : { invert: binding.invert }),
+      ...(binding.mode === undefined ? {} : { mode: binding.mode }),
+    })
+  }
+  return {
+    id: calibration.profileId,
+    joints: STANDARD_LIVE2D_RIG_PROFILE.joints,
+    parameters,
+  }
+}
+
+export function calibrationNeutralPose(calibration: Live2dCalibrationDescriptor): Live2dNeutralPose | undefined {
+  return calibration.neutralPose === undefined ? undefined : calibration.neutralPose
 }
 
 export class Live2dParameterAdapter {
   readonly #profile: Live2dRigProfile
+  readonly #neutralPose: Live2dNeutralPose | undefined
 
-  constructor(profile: Live2dRigProfile = STANDARD_LIVE2D_RIG_PROFILE) {
+  constructor(
+    profile: Live2dRigProfile = STANDARD_LIVE2D_RIG_PROFILE,
+    neutralPose?: Live2dNeutralPose,
+  ) {
     validateLive2dRigProfile(profile)
     this.#profile = profile
+    this.#neutralPose = neutralPose
   }
 
   get profile(): Live2dRigProfile {
@@ -178,10 +277,13 @@ export class Live2dParameterAdapter {
       if (rawValue === undefined) continue
       const scale = binding.scale ?? 1
       const scaled = binding.invert === true ? -rawValue * scale : rawValue * scale
+      const base = binding.mode === 'absolute'
+        ? 0
+        : this.#neutralPose?.[binding.parameterId] ?? binding.neutral
       updates.push({
         parameterId: binding.parameterId,
         control: binding.control,
-        value: clamp(binding.mode === 'absolute' ? scaled : binding.neutral + scaled, binding.min, binding.max),
+        value: clamp(binding.mode === 'absolute' ? scaled : base + scaled, binding.min, binding.max),
       })
     }
     return updates

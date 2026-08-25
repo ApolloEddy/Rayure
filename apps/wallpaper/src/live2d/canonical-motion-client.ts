@@ -2,7 +2,7 @@ import { validateCanonicalMotion } from '@rayure/protocol'
 import type { CanonicalMotion, MotionDescriptor } from '@rayure/protocol'
 
 import { Live2dMotionPlayer } from './motion-player.ts'
-import type { Live2dParameterSink, Live2dRigProfile } from './rig-profile.ts'
+import type { Live2dNeutralPose, Live2dParameterSink, Live2dRigProfile } from './rig-profile.ts'
 
 const MAX_GENERATED_MOTION_BYTES = 256 * 1024 * 1024
 
@@ -84,8 +84,8 @@ export class CanonicalMotionPlayer {
   #generation = 0
   #disposed = false
 
-  constructor(sink: Live2dParameterSink, profile?: Live2dRigProfile) {
-    this.#player = new Live2dMotionPlayer(sink, profile)
+  constructor(sink: Live2dParameterSink, profile?: Live2dRigProfile, neutralPose?: Live2dNeutralPose) {
+    this.#player = new Live2dMotionPlayer(sink, profile, neutralPose)
   }
 
   get isPlaying(): boolean {

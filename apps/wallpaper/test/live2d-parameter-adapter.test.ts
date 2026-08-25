@@ -4,6 +4,7 @@ import test from 'node:test'
 import type { CanonicalMotionFrame } from '@rayure/protocol'
 
 import {
+  LINGBO10_LIVE2D_RIG_PROFILE,
   Live2dParameterAdapter,
   SHIMAKAZE_LIVE2D_RIG_PROFILE,
   STANDARD_LIVE2D_RIG_PROFILE,
@@ -112,6 +113,10 @@ test('Shimakaze profile maps canonical legs to the model-specific parameter ids'
   assert.ok(!values.has('ParamLeg'))
   assert.equal(resolveLive2dRigProfile(['Param7', 'Param14', 'Param286']).id, SHIMAKAZE_LIVE2D_RIG_PROFILE.id)
   assert.equal(resolveLive2dRigProfile(['ParamAngleX']).id, STANDARD_LIVE2D_RIG_PROFILE.id)
+  assert.equal(
+    resolveLive2dRigProfile(['Param7', 'Param14', 'Param_Angle_Rotation118']).id,
+    LINGBO10_LIVE2D_RIG_PROFILE.id,
+  )
 })
 
 test('Live2D rig profiles reject duplicate parameters and invalid ranges', () => {
@@ -126,4 +131,20 @@ test('Live2D rig profiles reject duplicate parameters and invalid ranges', () =>
     ...STANDARD_LIVE2D_RIG_PROFILE,
     parameters: [{ parameterId: 'Invalid', control: 'headYaw', min: 2, max: 1, neutral: 0 }],
   }), /range/i)
+})
+
+test('Live2D adapter uses a calibrated neutral pose as the offset base', () => {
+  const adapter = new Live2dParameterAdapter(STANDARD_LIVE2D_RIG_PROFILE, { ParamAngleX: 10 })
+  const frame = makeFrame()
+  const values = new Map(adapter.mapFrame(frame).map(update => [update.parameterId, update.value]))
+  // headYaw of the fixture is 20; base 10 + 20 = 30 (clamped to the 30 max).
+  assert.equal(values.get('ParamAngleX'), 30)
+  // Body channels are unaffected by the missing neutral entry and use binding neutral.
+  assert.ok(Math.abs((values.get('ParamBodyAngleX') ?? 0) - 10) < 1e-9)
+})
+
+test('Live2D adapter ignores neutral pose entries for parameters outside the profile', () => {
+  const adapter = new Live2dParameterAdapter(STANDARD_LIVE2D_RIG_PROFILE, { ParamUnrelated: 99 })
+  const values = new Map(adapter.mapFrame(makeFrame()).map(update => [update.parameterId, update.value]))
+  assert.equal(values.has('ParamUnrelated'), false)
 })

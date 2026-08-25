@@ -137,6 +137,29 @@ export interface ModelDescriptor {
   nativeUrl?: string
   /** Source-scene parts hidden in the default skin-only view. */
   skinHiddenPartIds?: readonly string[]
+  /** Optional tokenized loopback URL of the model's rayure.calibration.json. */
+  calibrationUrl?: string
+}
+
+export interface Live2dCalibrationBinding {
+  parameterId: string
+  /** ARDY control name such as headYaw or leftThighAngle. */
+  control: string
+  min: number
+  max: number
+  neutral: number
+  scale?: number
+  invert?: boolean
+  mode?: 'offset' | 'absolute'
+}
+
+export interface Live2dCalibrationDescriptor {
+  profileId: string
+  parameters: readonly Live2dCalibrationBinding[]
+  /** ARDY controls intentionally disabled for this model (e.g. a seated pose). */
+  disabledControls?: readonly string[]
+  /** Parameter-id → value snapshot of the model's calibrated initial pose. */
+  neutralPose?: Readonly<Record<string, number>>
 }
 
 export interface ServerModelAvailableMessage {
@@ -807,6 +830,11 @@ export function serializeWireMessage(message: ClientMessage | ServerMessage): st
   return raw
 }
 
+/** Validates untrusted calibration JSON and returns a typed calibration descriptor. */
+export function parseLive2dCalibration(value: unknown): Live2dCalibrationDescriptor {
+  return requireLive2dCalibration(value)
+}
+
 function parseWireObject(raw: string): Record<string, unknown> {
   if (typeof raw !== 'string') throw new ProtocolValidationError('Wire message must be text')
   requireWireSize(raw)
@@ -925,9 +953,11 @@ function requireModelDescriptor(value: unknown): ModelDescriptor {
   const model = requireRecord(value, 'model descriptor')
   const hasNativeUrl = model.nativeUrl !== undefined
   const hasSkinHiddenPartIds = model.skinHiddenPartIds !== undefined
+  const hasCalibrationUrl = model.calibrationUrl !== undefined
   const expectedKeys = ['id', 'displayName', 'format', 'url']
   if (hasNativeUrl) expectedKeys.push('nativeUrl')
   if (hasSkinHiddenPartIds) expectedKeys.push('skinHiddenPartIds')
+  if (hasCalibrationUrl) expectedKeys.push('calibrationUrl')
   requireExactKeys(
     model,
     expectedKeys,
@@ -942,6 +972,9 @@ function requireModelDescriptor(value: unknown): ModelDescriptor {
   if (model.skinHiddenPartIds !== undefined && model.format !== 'live2d') {
     throw new ProtocolValidationError('skinHiddenPartIds are only supported for Live2D models')
   }
+  if (model.calibrationUrl !== undefined && model.format !== 'live2d') {
+    throw new ProtocolValidationError('calibrationUrl is only supported for Live2D models')
+  }
   const skinHiddenPartIds = model.skinHiddenPartIds === undefined
     ? undefined
     : requireSkinHiddenPartIds(model.skinHiddenPartIds)
@@ -952,7 +985,130 @@ function requireModelDescriptor(value: unknown): ModelDescriptor {
     url: requireLoopbackAssetUrl(model.url),
     ...(model.nativeUrl === undefined ? {} : { nativeUrl: requireLoopbackAssetUrl(model.nativeUrl) }),
     ...(skinHiddenPartIds === undefined ? {} : { skinHiddenPartIds }),
+    ...(model.calibrationUrl === undefined ? {} : { calibrationUrl: requireLoopbackAssetUrl(model.calibrationUrl) }),
   }
+}
+
+function requireLive2dCalibration(value: unknown): Live2dCalibrationDescriptor {
+  const root = requireRecord(value, 'live2d calibration')
+  const expectedKeys = ['profileId', 'parameters']
+  if (root.disabledControls !== undefined) expectedKeys.push('disabledControls')
+  if (root.neutralPose !== undefined) expectedKeys.push('neutralPose')
+  requireExactKeys(root, expectedKeys, 'live2d calibration')
+  const profileId = requireDisplayString(root.profileId, 'live2d calibration profileId', 64)
+  if (!Array.isArray(root.parameters) || root.parameters.length === 0 || root.parameters.length > 128) {
+    throw new ProtocolValidationError('live2d calibration parameters must contain 1-128 bindings')
+  }
+  const seen = new Set<string>()
+  const parameters = root.parameters.map((entry, index) => {
+    const binding = requireRecord(entry, `live2d calibration parameters[${index}]`)
+    const keys = ['parameterId', 'control', 'min', 'max', 'neutral']
+    if (binding.scale !== undefined) keys.push('scale')
+    if (binding.invert !== undefined) keys.push('invert')
+    if (binding.mode !== undefined) keys.push('mode')
+    requireExactKeys(binding, keys, `live2d calibration parameters[${index}]`)
+    const parameterId = requireDisplayString(binding.parameterId, `live2d calibration parameters[${index}] parameterId`, 128)
+    if (seen.has(parameterId)) {
+      throw new ProtocolValidationError(`live2d calibration duplicates parameterId: ${parameterId}`)
+    }
+    seen.add(parameterId)
+    const control = requireDisplayString(binding.control, `live2d calibration parameters[${index}] control`, 64)
+    const min = requireCalibrationNumber(binding.min, `live2d calibration parameters[${index}] min`)
+    const max = requireCalibrationNumber(binding.max, `live2d calibration parameters[${index}] max`)
+    if (min >= max) {
+      throw new ProtocolValidationError(`live2d calibration parameters[${index}] min must be below max`)
+    }
+    const neutral = requireCalibrationNumber(binding.neutral, `live2d calibration parameters[${index}] neutral`)
+    if (neutral < min || neutral > max) {
+      throw new ProtocolValidationError(`live2d calibration parameters[${index}] neutral must be within min/max`)
+    }
+    if (binding.mode !== undefined && binding.mode !== 'offset' && binding.mode !== 'absolute') {
+      throw new ProtocolValidationError(`live2d calibration parameters[${index}] mode must be offset or absolute`)
+    }
+    const mode = binding.mode === undefined ? undefined : binding.mode as 'offset' | 'absolute'
+    return {
+      parameterId,
+      control,
+      min,
+      max,
+      neutral,
+      ...(binding.scale === undefined
+        ? {}
+        : { scale: requireCalibrationNumber(binding.scale, `live2d calibration parameters[${index}] scale`) }),
+      ...(binding.invert === undefined ? {} : { invert: requireBoolean(binding.invert, `live2d calibration parameters[${index}] invert`) }),
+      ...(mode === undefined ? {} : { mode }),
+    }
+  })
+  const disabledControls = root.disabledControls === undefined
+    ? undefined
+    : requireStringList(root.disabledControls, 'live2d calibration disabledControls', 64, 128)
+  const neutralPose = root.neutralPose === undefined
+    ? undefined
+    : requireNumberRecord(root.neutralPose, 'live2d calibration neutralPose', 512)
+  return {
+    profileId,
+    parameters,
+    ...(disabledControls === undefined ? {} : { disabledControls }),
+    ...(neutralPose === undefined ? {} : { neutralPose }),
+  }
+}
+
+function requireCalibrationNumber(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new ProtocolValidationError(`${label} must be a finite number`)
+  }
+  return value
+}
+
+function requireBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== 'boolean') throw new ProtocolValidationError(`${label} must be a boolean`)
+  return value
+}
+
+function requireStringList(value: unknown, label: string, maxLength: number, maxItems: number): readonly string[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > maxItems) {
+    throw new ProtocolValidationError(`${label} must contain 1-${maxItems} entries`)
+  }
+  const items = value.map((entry, index) => {
+    if (
+      typeof entry !== 'string'
+      || entry.length < 1
+      || entry.length > maxLength
+      || entry.trim() !== entry
+      || /[\u0000-\u001F\u007F]/u.test(entry)
+    ) {
+      throw new ProtocolValidationError(`${label}[${index}] must be a trimmed printable identifier`)
+    }
+    return entry
+  })
+  if (new Set(items).size !== items.length) {
+    throw new ProtocolValidationError(`${label} must not contain duplicates`)
+  }
+  return items
+}
+
+function requireNumberRecord(value: unknown, label: string, maxEntries: number): Readonly<Record<string, number>> {
+  const root = requireRecord(value, label)
+  const entries = Object.entries(root)
+  if (entries.length === 0 || entries.length > maxEntries) {
+    throw new ProtocolValidationError(`${label} must contain 1-${maxEntries} entries`)
+  }
+  const result: Record<string, number> = {}
+  for (const [key, entry] of entries) {
+    if (
+      key.length < 1
+      || key.length > 128
+      || key.trim() !== key
+      || /[\u0000-\u001F\u007F]/u.test(key)
+    ) {
+      throw new ProtocolValidationError(`${label} contains an invalid parameter id`)
+    }
+    if (typeof entry !== 'number' || !Number.isFinite(entry)) {
+      throw new ProtocolValidationError(`${label}.${key} must be a finite number`)
+    }
+    result[key] = entry
+  }
+  return result
 }
 
 function requireSkinHiddenPartIds(value: unknown): readonly string[] {

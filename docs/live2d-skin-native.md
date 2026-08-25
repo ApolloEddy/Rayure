@@ -42,3 +42,23 @@ pnpm dev:wallpaper
 ## 资源边界
 
 岛风模型、动作、纹理和本地配置均保持在 `scratch/`。仓库只保留格式解析、皮套入口生成、原生内容切换和运行时适配代码；任何模型资源都不应复制到 `apps/wallpaper/public/` 或生产 `dist/`。
+
+## 默认视图一致性（M0）
+
+浏览器开发预览与 Wallpaper Engine 采用同一个默认值：**skin-only**，即默认不导入模型自带动作、不显示模型自带场景层。预览要看自带内容时显式加 `?live2dNativeContent=1`。
+
+## 初始姿势（M1）
+
+加载后所有 Live2D 模型默认应用**模型中性姿势**（参数默认值），动作结束后淡回该姿势；可通过模型专属 `rayure.calibration.json` 的 `neutralPose` 覆盖为标定快照，ARDY 动作以该姿势为 offset 基准叠加。未配置时使用参数默认值（立绘姿势）。
+
+## 标定向导（M2）
+
+Live2D 模型加载后，若无 `rayure.calibration.json` 且从未标定过，自动弹出**模型标定向导**（四步）：
+
+1. **ARDY 通道标定**：未映射的通道列出候选参数，点击「试摆」实时驱动模型观察部位，确认后写入映射；可反转方向，可禁用模型不具备的部位。
+2. **场景部件**：逐个 toggle 部件透明度，勾选生成 `skinHiddenPartIds`（替代自动识别缺失时的手工配置）。
+3. **初始姿势**：滑杆微调映射参数摆出站立/放下姿势，捕获为 `neutralPose` 快照。
+4. **保存**：POST 到 Companion 的校准端点，写入模型目录 `rayure.calibration.json`，刷新后生效。手动进入用 `?calibrate=1`。
+
+校准文件由 Companion 校验并通过 tokenized `calibrationUrl` 下发；`skinHiddenPartIds` 的优先级为 校准文件 > 自动识别 > `rayure.local.json`。任何模型资源的来源（含校准文件）仍在 `scratch/` 或模型目录内，不入仓库/发布包。
+

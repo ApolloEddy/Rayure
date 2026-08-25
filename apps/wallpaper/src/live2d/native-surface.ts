@@ -17,7 +17,7 @@ import { CanonicalMotionPlayer } from './canonical-motion-client.ts'
 import { Live2dMotionController } from './motion-controller.ts'
 import type { Live2dMotionModelLike } from './motion-controller.ts'
 import { Live2dMotionPlayer } from './motion-player.ts'
-import type { Live2dParameterSink } from './rig-profile.ts'
+import type { Live2dNeutralPose, Live2dParameterSink, Live2dRigProfile } from './rig-profile.ts'
 import { resolveLive2dRigProfile } from './rig-profile.ts'
 import {
   Live2dExpressionController,
@@ -30,6 +30,14 @@ import type { ParameterCrossfade } from './parameter-crossfade.ts'
 
 const coreScriptLoads = new Map<string, Promise<void>>()
 const GENERATED_MOTION_BLEND_MS = 180
+const POSE_RESTORE_FADE_MS = 320
+
+interface NativePoseBlend {
+  startedAtMs: number
+  durationMs: number
+  from: ReadonlyMap<string, number>
+  target: ReadonlyMap<string, number>
+}
 
 interface NativeLive2dModel {
   load(link: string): Promise<void>
@@ -52,6 +60,13 @@ interface NativeLive2dModel {
   setPartOpacity?(partId: string, opacity: number): void
   getParameterNames?(): readonly string[]
   getParameterValue?(parameterId: string): number
+}
+
+export interface Live2dParameterRange {
+  id: string
+  min: number
+  max: number
+  defaultValue: number
 }
 
 export interface Live2dNativeSnapshot {
@@ -77,6 +92,10 @@ export interface Live2dNativeSurfaceOptions {
   skinHiddenPartIds?: readonly string[]
   /** Show source scene/effect parts for an explicit native-content import. */
   showNativeParts?: boolean
+  /** Calibrated initial pose applied on load and restored after motions end. */
+  neutralPose?: Live2dNeutralPose
+  /** Calibrated ARDY rig bindings; overrides sentinel-based profile resolution. */
+  rigProfile?: Live2dRigProfile
   onSnapshot?: (snapshot: Live2dNativeSnapshot) => void
   onGeneratedMotionPlayback?: (observation: {
     motionId: string
@@ -111,6 +130,8 @@ export class Live2dNativeSurface implements Live2dParameterSink {
   readonly #debugFallbackEnabled: boolean
   readonly #skinHiddenPartIds: readonly string[]
   readonly #showNativeParts: boolean
+  readonly #neutralPose: Live2dNeutralPose | undefined
+  readonly #rigProfile: Live2dRigProfile | undefined
   readonly #onSnapshot: ((snapshot: Live2dNativeSnapshot) => void) | undefined
   readonly #onGeneratedMotionPlayback: Live2dNativeSurfaceOptions['onGeneratedMotionPlayback']
   readonly #motion = createLive2dDebugMotion()
@@ -130,6 +151,7 @@ export class Live2dNativeSurface implements Live2dParameterSink {
   #motionCatalog: readonly Live2dMotionDescriptor[] = []
   #parameterOwner: 'none' | 'native' | 'generated' | 'debug' = 'none'
   #parameterBlend: ParameterCrossfade | undefined
+  #poseBlend: NativePoseBlend | undefined
   #idleRestorePending = false
   #lastGeneratedPlayback: { motionId: string, frameIndex: number } | undefined
   #generatedRootOrigin: CanonicalVector3 | undefined
@@ -148,6 +170,8 @@ export class Live2dNativeSurface implements Live2dParameterSink {
     this.#debugFallbackEnabled = options.debugFallback === true
     this.#skinHiddenPartIds = [...new Set(options.skinHiddenPartIds ?? [])]
     this.#showNativeParts = options.showNativeParts === true
+    this.#neutralPose = options.neutralPose
+    this.#rigProfile = options.rigProfile
     this.#onSnapshot = options.onSnapshot
     this.#onGeneratedMotionPlayback = options.onGeneratedMotionPlayback
   }
@@ -224,13 +248,14 @@ export class Live2dNativeSurface implements Live2dParameterSink {
       this.#nativeMotion.bindModel(model)
       this.#parameterIds = [...(model.getParameterNames?.() ?? [])]
       this.#speechMouthParameterId = this.#parameterIds.find(parameterId => /mouth.*open|open.*mouth|mouthopeny/iu.test(parameterId))
-      const rigProfile = resolveLive2dRigProfile(this.#parameterIds)
-      this.#player = new Live2dMotionPlayer(this, rigProfile)
-      this.#generatedMotion = new CanonicalMotionPlayer(this, rigProfile)
+      const rigProfile = this.#rigProfile ?? resolveLive2dRigProfile(this.#parameterIds)
+      this.#player = new Live2dMotionPlayer(this, rigProfile, this.#neutralPose)
+      this.#generatedMotion = new CanonicalMotionPlayer(this, rigProfile, this.#neutralPose)
       window.addEventListener('resize', this.#resize, { passive: true })
       this.#lastRenderedAt = performance.now()
       this.#animationFrame = requestAnimationFrame(this.#render)
       this.#resize()
+      this.#applyNeutralPose(0)
       this.#emit(this.#snapshot())
       return true
     }
@@ -292,6 +317,60 @@ export class Live2dNativeSurface implements Live2dParameterSink {
     this.#speechMouthValue = Math.min(1, Math.max(0, value))
   }
 
+  /** Calibration: write a parameter directly for visual trial, bypassing the motion adapter. */
+  previewParameter(parameterId: string, value: number): boolean {
+    if (!this.#modelReady || !this.#model || !this.#parameterIds.includes(parameterId) || !Number.isFinite(value)) {
+      return false
+    }
+    this.#model.setParameter(parameterId, value)
+    this.#parameters.set(parameterId, value)
+    return true
+  }
+
+  getParameterRanges(): readonly Live2dParameterRange[] {
+    if (!this.#modelReady) return []
+    const model = this.#model as unknown as {
+      parameters?: {
+        ids?: readonly string[]
+        defaultValues?: readonly number[]
+        minimumValues?: readonly number[]
+        maximumValues?: readonly number[]
+      }
+    } | undefined
+    const parameters = model?.parameters
+    if (parameters?.ids === undefined) return []
+    return parameters.ids.map((id, index) => ({
+      id,
+      min: parameters.minimumValues?.[index] ?? -1,
+      max: parameters.maximumValues?.[index] ?? 1,
+      defaultValue: parameters.defaultValues?.[index] ?? 0,
+    }))
+  }
+
+  getPartIds(): readonly string[] {
+    if (!this.#modelReady) return []
+    const model = this.#model as unknown as { parts?: { ids?: readonly string[] } } | undefined
+    return [...(model?.parts?.ids ?? [])]
+  }
+
+  setPartOpacity(partId: string, opacity: number): boolean {
+    if (!this.#modelReady || !this.#model?.setPartOpacity || !Number.isFinite(opacity)) return false
+    this.#model.setPartOpacity(partId, opacity)
+    return true
+  }
+
+  resetParameterDefaults(): void {
+    if (!this.#modelReady || !this.#model) return
+    const model = this.#model as unknown as { resetParameters?: () => void } | undefined
+    model?.resetParameters?.()
+    this.#parameters.clear()
+  }
+
+  getParameterValue(parameterId: string): number | undefined {
+    if (!this.#modelReady || !this.#model) return undefined
+    return this.#model.getParameterValue?.(parameterId) ?? this.#parameters.get(parameterId)
+  }
+
   updateMotionCatalog(motions: readonly MotionDescriptor[]): void {
     if (this.#disposed) return
     const nextCatalog = motions.filter((motion): motion is Live2dMotionDescriptor => motion.format === 'live2d')
@@ -306,6 +385,7 @@ export class Live2dNativeSurface implements Live2dParameterSink {
     if (this.#parameterOwner === 'native') {
       this.#parameterOwner = 'none'
       this.#parameterBlend = undefined
+      this.#applyNeutralPose(POSE_RESTORE_FADE_MS)
     }
   }
 
@@ -317,6 +397,7 @@ export class Live2dNativeSurface implements Live2dParameterSink {
     this.#stopGeneratedMotion('cancelled', false)
     this.#resetGeneratedRootOffset()
     this.#player?.stop()
+    this.#poseBlend = undefined
     this.#parameterOwner = 'native'
     this.#parameterBlend = undefined
     return this.#nativeMotion.playMotion(descriptor).then((started) => {
@@ -356,6 +437,7 @@ export class Live2dNativeSurface implements Live2dParameterSink {
     this.#stopGeneratedMotion('cancelled', false)
     this.#nativeMotion.stopMotion()
     this.#player?.stop()
+    this.#poseBlend = undefined
     this.#parameterOwner = 'generated'
     this.#parameterBlend = createParameterCrossfade(
       this.#captureParameterValues(),
@@ -404,6 +486,11 @@ export class Live2dNativeSurface implements Live2dParameterSink {
       if (!restored && this.#debugFallbackEnabled && !this.#disposed && !this.#generatedMotion?.isPlaying) {
         this.#startDebugFallback()
       }
+      // Skin-only mode has no native idle and no debug fixture: fade back to
+      // the calibrated initial pose instead of freezing on the last frame.
+      if (!restored && this.#parameterOwner === 'none') {
+        this.#applyNeutralPose(POSE_RESTORE_FADE_MS)
+      }
     }
     finally {
       this.#idleRestorePending = false
@@ -414,12 +501,58 @@ export class Live2dNativeSurface implements Live2dParameterSink {
     if (!this.#debugFallbackEnabled || this.#disposed || !this.#player || this.#generatedMotion?.isPlaying) return
     this.#nativeMotion.stopMotion()
     this.#resetGeneratedRootOffset()
+    this.#poseBlend = undefined
     this.#parameterOwner = 'debug'
     this.#parameterBlend = undefined
     if (!this.#player.isPlaying) {
       this.#player.bind(this.#motion)
       this.#player.advance(0)
     }
+  }
+
+  /**
+   * Applies the calibrated initial pose. `fadeMs === 0` snaps the model into
+   * the pose (used right after load); a positive duration crossfades from the
+   * live values so returning to the pose after a motion reads as one move.
+   */
+  #applyNeutralPose(fadeMs: number): void {
+    if (this.#disposed || !this.#modelReady || !this.#model) return
+    const target = new Map<string, number>()
+    for (const [parameterId, value] of Object.entries(this.#neutralPose ?? {})) {
+      if (this.#parameterIds.includes(parameterId) && Number.isFinite(value)) {
+        target.set(parameterId, value)
+      }
+    }
+    if (target.size === 0) return
+    if (fadeMs > 0) {
+      this.#poseBlend = {
+        startedAtMs: performance.now(),
+        durationMs: fadeMs,
+        from: this.#captureParameterValues(),
+        target,
+      }
+      return
+    }
+    this.#poseBlend = undefined
+    for (const [parameterId, value] of target) {
+      this.#model.setParameter(parameterId, value)
+      this.#parameters.set(parameterId, value)
+    }
+  }
+
+  #tickPoseBlend(timestampMs: number): void {
+    const blend = this.#poseBlend
+    const model = this.#model
+    if (blend === undefined || model === undefined) return
+    const alpha = Math.min(1, Math.max(0, (timestampMs - blend.startedAtMs) / blend.durationMs))
+    for (const [parameterId, target] of blend.target) {
+      const source = blend.from.get(parameterId)
+      const base = source !== undefined && Number.isFinite(source) ? source : target
+      const value = base + (target - base) * alpha
+      model.setParameter(parameterId, value)
+      this.#parameters.set(parameterId, value)
+    }
+    if (alpha >= 1) this.#poseBlend = undefined
   }
 
   #applySkinPartVisibility(model: NativeLive2dModel): void {
@@ -532,6 +665,7 @@ export class Live2dNativeSurface implements Live2dParameterSink {
     this.#player = undefined
     this.#generatedMotion?.dispose()
     this.#generatedMotion = undefined
+    this.#poseBlend = undefined
     try {
       this.#model?.destroy()
     }
@@ -578,6 +712,7 @@ export class Live2dNativeSurface implements Live2dParameterSink {
       this.#parameterOwner = 'debug'
       this.#player.advance(deltaSeconds)
     }
+    if (this.#parameterOwner === 'none') this.#tickPoseBlend(timestamp)
     const mouthParameterId = this.#speechMouthParameterId
     if (mouthParameterId !== undefined) {
       this.#model.setParameter(mouthParameterId, this.#speechMouthValue)

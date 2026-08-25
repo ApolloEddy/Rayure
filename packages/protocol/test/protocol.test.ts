@@ -15,6 +15,7 @@ import {
   createServerSpeechPublished,
   createServerWelcome,
   parseClientMessage,
+  parseLive2dCalibration,
   parseServerMessage,
 } from '../src/index.ts'
 
@@ -204,6 +205,64 @@ test('wire parser rejects non-objects, unknown fields and unsupported messages',
 test('wire parser measures UTF-8 bytes and rejects oversized messages', () => {
   const oversized = '界'.repeat(Math.ceil(MAX_WIRE_MESSAGE_BYTES / 3) + 1)
   assert.throws(() => parseClientMessage(oversized), /maximum wire size/i)
+})
+
+test('model availability carries an optional calibration URL for Live2D models', () => {
+  const available = createServerModelAvailable({
+    id: 'live2d-calibration-1',
+    model: {
+      id: 'lingbo10-debug',
+      displayName: 'Ayanami 10 debug',
+      format: 'live2d',
+      url: 'http://127.0.0.1:32145/assets/0123456789abcdef/__rayure_skin__lingbo_10.model3.json',
+      calibrationUrl: 'http://127.0.0.1:32145/assets/0123456789abcdef/rayure.calibration.json',
+    },
+  })
+  const parsed = parseServerMessage(JSON.stringify(available))
+  assert.deepEqual(parsed, available)
+  if (parsed.type !== 'model.available') assert.fail('expected model.available')
+  assert.equal(parsed.payload.model.calibrationUrl, 'http://127.0.0.1:32145/assets/0123456789abcdef/rayure.calibration.json')
+})
+
+test('model availability rejects calibration URLs for PMX models', () => {
+  assert.throws(() => createServerModelAvailable({
+    id: 'pmx-calibration-reject',
+    model: {
+      id: 'local-test-model',
+      displayName: 'Local test model',
+      format: 'pmx',
+      url: 'http://127.0.0.1:32145/assets/0123456789abcdef/model.pmx',
+      calibrationUrl: 'http://127.0.0.1:32145/assets/0123456789abcdef/rayure.calibration.json',
+    },
+  }), ProtocolValidationError)
+})
+
+test('calibration descriptor validates bindings, disabled controls and neutral pose', () => {
+  const valid = {
+    profileId: 'rayure-live2d-lingbo10-v1',
+    parameters: [
+      { parameterId: 'ParamAngleX', control: 'headYaw', min: -30, max: 30, neutral: 0 },
+      { parameterId: 'Param7', control: 'leftThighAngle', min: -20, max: 20, neutral: 0, scale: 4 },
+      { parameterId: 'Param2', control: 'rightArmAngle', min: -90, max: 90, neutral: 0, invert: true, mode: 'offset' },
+    ],
+    disabledControls: ['leftThighAngle'],
+    neutralPose: { ParamAngleX: 5, Param7: 0 },
+  }
+  assert.deepEqual(parseLive2dCalibration(valid), valid)
+
+  for (const bad of [
+    { ...valid, profileId: ' x' },
+    { ...valid, parameters: [] },
+    { ...valid, parameters: [{ ...valid.parameters[0], min: 10, max: 0 }] },
+    { ...valid, parameters: [{ ...valid.parameters[0], neutral: 999 }] },
+    { ...valid, parameters: [{ ...valid.parameters[0], mode: 'weird' }] },
+    { ...valid, parameters: [valid.parameters[0], valid.parameters[0]] },
+    { ...valid, disabledControls: ['a', 'a'] },
+    { ...valid, neutralPose: { 'bad\u0000key': 0 } },
+    { ...valid, extraField: true },
+  ]) {
+    assert.throws(() => parseLive2dCalibration(bad), ProtocolValidationError)
+  }
 })
 
 test('factories reject control characters and oversized identifiers', () => {

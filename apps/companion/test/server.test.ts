@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -16,6 +16,113 @@ import {
 } from '@rayure/protocol'
 import { createCompanionServer } from '../src/server.ts'
 import { ARDY_CORE_JOINT_NAMES, convertArdyMotion } from '../src/ardy-motion-adapter.ts'
+
+test('a Live2D model with a calibration file serves it and accepts a POST save', async (t) => {
+  const assetRoot = await mkdtemp(join(tmpdir(), 'rayure-calibration-assets-'))
+  t.after(() => rm(assetRoot, { recursive: true, force: true }))
+  await mkdir(join(assetRoot, 'tex'))
+  const modelBytes = Buffer.from(JSON.stringify({ Version: 3, FileReferences: {} }))
+  const mocBytes = Buffer.from([0x4d, 0x4f, 0x43, 0x33])
+  const textureBytes = Buffer.from([137, 80, 78, 71])
+  await writeFile(join(assetRoot, 'M.model3.json'), modelBytes)
+  await writeFile(join(assetRoot, 'M.moc3'), mocBytes)
+  await writeFile(join(assetRoot, 'tex', 'texture_00.png'), textureBytes)
+  const calibration = {
+    profileId: 'test-calibration-profile',
+    parameters: [{ parameterId: 'ParamAngleX', control: 'headYaw', min: -30, max: 30, neutral: 0 }],
+    neutralPose: { ParamAngleX: 0 },
+  }
+  await writeFile(join(assetRoot, 'rayure.calibration.json'), Buffer.from(JSON.stringify(calibration)))
+
+  const server = createCompanionServer({
+    port: 0,
+    helloTimeoutMs: 500,
+    createAssetToken: () => '0123456789abcdef0123456789abcdef',
+    model: {
+      id: 'cal-debug',
+      displayName: 'Calibration debug',
+      format: 'live2d',
+      entryFilePath: join(assetRoot, 'M.model3.json'),
+    },
+  })
+  const address = await server.start()
+  t.after(() => server.stop())
+
+  const socket = new WebSocket(`ws://${address.host}:${address.port}/ws`, {
+    origin: 'http://127.0.0.1:4173',
+  })
+  t.after(() => socket.close())
+  await once(socket, 'open')
+  const modelMessagePromise = new Promise<{ calibrationUrl?: string }>((resolveMessage) => {
+    socket.on('message', (data) => {
+      const message = parseServerMessage(Buffer.from(data as ArrayBuffer).toString())
+      if (message.type === 'model.available') resolveMessage(message.payload.model)
+    })
+  })
+  socket.send(JSON.stringify(createClientHello({ id: 'hello-calibration', build: 'test' })))
+
+  const model = await modelMessagePromise
+  assert.ok(model.calibrationUrl, 'expected a calibration URL')
+  const calibrationUrl = model.calibrationUrl!
+
+  const served = await fetch(calibrationUrl, { cache: 'no-store', credentials: 'omit' })
+  assert.equal(served.status, 200)
+  assert.deepEqual(JSON.parse(await served.text()), calibration)
+
+  const updated = {
+    profileId: 'test-calibration-profile',
+    parameters: [{ parameterId: 'ParamAngleX', control: 'headYaw', min: -30, max: 30, neutral: 12 }],
+    neutralPose: { ParamAngleX: 12 },
+  }
+  const save = await fetch(calibrationUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(updated),
+  })
+  assert.equal(save.status, 204)
+
+  const reloaded = await fetch(calibrationUrl, { cache: 'no-store', credentials: 'omit' })
+  assert.equal(reloaded.status, 200)
+  assert.deepEqual(JSON.parse(await reloaded.text()), updated)
+  assert.deepEqual(JSON.parse(await readFile(join(assetRoot, 'rayure.calibration.json'), 'utf8')), updated)
+})
+
+test('calibration POST rejects invalid payloads and non-Live2D assets', async (t) => {
+  const assetRoot = await mkdtemp(join(tmpdir(), 'rayure-calibration-reject-'))
+  t.after(() => rm(assetRoot, { recursive: true, force: true }))
+  const modelBytes = Buffer.from(JSON.stringify({ Version: 3, FileReferences: {} }))
+  const mocBytes = Buffer.from([0x4d, 0x4f, 0x43, 0x33])
+  await writeFile(join(assetRoot, 'M.model3.json'), modelBytes)
+  await writeFile(join(assetRoot, 'M.moc3'), mocBytes)
+
+  const server = createCompanionServer({
+    port: 0,
+    helloTimeoutMs: 500,
+    createAssetToken: () => '0123456789abcdef0123456789abcdef',
+    model: {
+      id: 'cal-reject',
+      displayName: 'Calibration reject',
+      format: 'live2d',
+      entryFilePath: join(assetRoot, 'M.model3.json'),
+    },
+  })
+  const address = await server.start()
+  t.after(() => server.stop())
+
+  const badSave = await fetch(`http://${address.host}:${address.port}/assets/0123456789abcdef0123456789abcdef/rayure.calibration.json`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ profileId: 'x', parameters: [] }),
+  })
+  assert.equal(badSave.status, 400)
+
+  const wrongPath = await fetch(`http://${address.host}:${address.port}/assets/0123456789abcdef0123456789abcdef/other.json`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ profileId: 'x', parameters: [{ parameterId: 'A', control: 'headYaw', min: -1, max: 1, neutral: 0 }] }),
+  })
+  assert.equal(wrongPath.status, 404)
+})
 
 test('server binds only to loopback and completes a correlated handshake', async (t) => {
   const server = createCompanionServer({ port: 0, helloTimeoutMs: 500 })
