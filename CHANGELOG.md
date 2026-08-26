@@ -10,6 +10,7 @@
 - 修复 Blender glTF `ACTIONS` 导出会把目标 FBX 自带 Action 一并写入产物的问题：导出窗口只保留本次 `rayure__...` baked Action，clean import 回归确认每个通过样本只有目标 clip；
 - 完成 4 槽位 × 3 类动作的 HRS-only 预检：VRM reference 与一个 FBX container 各 3/3 通过，MMD/复杂变形 rig 因 12/15 核心角色 off-by-one 失败，Rigify/custom `.blend` 因 HRS 自动执行门失败；两个通过样本实际均为 `VRM/VRoid` target profile，故未满足至少 3 个 rig 家族与 3/4 门禁；
 - 新增脱敏证据 `tools/rig-pipeline/reports/phase2-poc-evidence.md`；Phase 2 停在证据门，未修改生产 runtime、协议或 `apps/`/`packages/`，未进入 Phase 3；Auto-Rig Pro 不在本项目路径中使用。
+- 记录 Auto-Rig Pro 3.78.32 + Quick Rig 1.27.21 试用：复用现有 Blender 4.2.23 在隔离 profile 注册成功，并以显式映射在派蒙 16 骨核心夹具上生成 227 骨 ARP rig；其对完整 MMD 骨架的 fuzzy 映射仅 1/16 正确，故 ARP 暂列离线候选，不替换 HRS、不改生产 runtime；详见 `tools/rig-pipeline/reports/auto-rig-pro-trial.md`。
 
 ### 离线骨架标准化与烘焙动作管线（Phase 0 — 基线/工具链/审计）
 
