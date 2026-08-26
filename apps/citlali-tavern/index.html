@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2.5D Live 开放世界酒馆桌前交互系统 | VRM + ARDY + EMAGE</title>
+    <style>
+        :root {
+            --bg-color: #0b0d16;
+            --panel-bg: rgba(18, 22, 35, 0.92);
+            --panel-border: rgba(120, 140, 220, 0.25);
+            --accent-color: #ff6b9d;
+            --accent-cyan: #00f2fe;
+            --accent-green: #00ff88;
+            --accent-gold: #ffd166;
+            --text-main: #f0f4fc;
+            --text-sub: #8e9bb5;
+            --glass-blur: blur(16px);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+            cursor: crosshair;
+        }
+
+        .top-bar {
+            position: absolute;
+            top: 16px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .brand-badge {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            backdrop-filter: var(--glass-blur);
+            padding: 8px 18px;
+            border-radius: 30px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            pointer-events: auto;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--accent-green);
+            box-shadow: 0 0 10px var(--accent-green);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.85); }
+        }
+
+        .brand-title {
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            background: linear-gradient(135deg, #fff 0%, #ffd166 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .stats-badge {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            backdrop-filter: var(--glass-blur);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            color: var(--text-sub);
+            font-family: monospace;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            pointer-events: auto;
+        }
+
+        .dialogue-bubble {
+            position: absolute;
+            top: 18%;
+            left: 25%;
+            max-width: 380px;
+            background: rgba(26, 31, 48, 0.95);
+            border: 1px solid rgba(255, 107, 157, 0.55);
+            backdrop-filter: var(--glass-blur);
+            border-radius: 18px 18px 18px 4px;
+            padding: 14px 18px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(255, 107, 157, 0.25);
+            z-index: 15;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            opacity: 0;
+            transform: translateY(10px) scale(0.95);
+            pointer-events: none;
+        }
+
+        .dialogue-bubble.active {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        .dialogue-name {
+            font-size: 11px;
+            font-weight: bold;
+            color: var(--accent-color);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+        }
+
+        .dialogue-text {
+            font-size: 14px;
+            line-height: 1.5;
+            color: #ffffff;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+        }
+
+        .control-panel {
+            position: absolute;
+            right: 20px;
+            top: 70px;
+            bottom: 20px;
+            width: 380px;
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            backdrop-filter: var(--glass-blur);
+            border-radius: 20px;
+            padding: 18px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 10;
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+            overflow-y: auto;
+        }
+
+        .control-panel::-webkit-scrollbar {
+            width: 4px;
+        }
+        .control-panel::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+
+        .section-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-sub);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .section-title::before {
+            content: "";
+            display: inline-block;
+            width: 4px;
+            height: 12px;
+            background: var(--accent-cyan);
+            border-radius: 2px;
+        }
+
+        .profiler-card {
+            background: rgba(10, 13, 22, 0.65);
+            border: 1px solid rgba(0, 242, 254, 0.2);
+            border-radius: 12px;
+            padding: 12px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+            font-family: monospace;
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11.5px;
+        }
+
+        .metric-name {
+            color: var(--text-sub);
+        }
+
+        .metric-val {
+            color: #fff;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .badge-pill {
+            padding: 2px 7px;
+            border-radius: 10px;
+            font-size: 10.5px;
+            font-weight: bold;
+        }
+        .badge-green {
+            background: rgba(0, 255, 136, 0.18);
+            color: #00ff88;
+            border: 1px solid rgba(0, 255, 136, 0.4);
+        }
+        .badge-cyan {
+            background: rgba(0, 242, 254, 0.18);
+            color: #00f2fe;
+            border: 1px solid rgba(0, 242, 254, 0.4);
+        }
+        .badge-gold {
+            background: rgba(255, 209, 102, 0.18);
+            color: #ffd166;
+            border: 1px solid rgba(255, 209, 102, 0.4);
+        }
+
+        .select-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #fff;
+            padding: 9px 12px;
+            border-radius: 10px;
+            font-size: 13px;
+            outline: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .select-input:hover {
+            border-color: var(--accent-cyan);
+        }
+        .select-input option {
+            background: #181d2c;
+            color: #fff;
+        }
+
+        .btn-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+            padding: 9px 12px;
+            border-radius: 10px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .btn:hover {
+            background: rgba(255, 107, 157, 0.18);
+            border-color: rgba(255, 107, 157, 0.5);
+            color: #fff;
+            transform: translateY(-1px);
+        }
+
+        .btn.active {
+            background: linear-gradient(135deg, var(--accent-color), #7b2cbf);
+            border-color: transparent;
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(255, 107, 157, 0.4);
+        }
+
+        .emage-box {
+            background: rgba(10, 12, 20, 0.75);
+            border: 1px solid rgba(0, 242, 254, 0.35);
+            border-radius: 12px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .text-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12.5px;
+            outline: none;
+        }
+        .text-input:focus {
+            border-color: var(--accent-cyan);
+        }
+
+        .action-btn {
+            background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+            border: none;
+            color: #000;
+            font-weight: bold;
+            padding: 10px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .action-btn:hover {
+            box-shadow: 0 4px 20px rgba(0, 242, 254, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .telemetry-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--text-sub);
+            font-family: monospace;
+        }
+
+        #loader {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #090a10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            z-index: 100;
+            transition: opacity 0.5s ease;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255, 107, 157, 0.1);
+            border-top: 3px solid var(--accent-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loader-text {
+            font-size: 14px;
+            letter-spacing: 1px;
+            color: var(--text-sub);
+        }
+
+        .loader-progress {
+            font-family: monospace;
+            color: var(--accent-cyan);
+            font-size: 14px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="top-bar">
+        <div class="brand-badge">
+            <div class="status-dot"></div>
+            <span class="brand-title" id="title-name">2.5D 酒馆桌前交互中枢 (EMAGE 对话手势 v4.8)</span>
+        </div>
+        <div class="stats-badge">
+            <span id="top-fps">FPS: 60.0</span>
+            <span id="top-emage-rt" style="color: var(--accent-green);">EMAGE: 实时语义手势</span>
+            <span id="top-pose" style="color: var(--accent-cyan);">姿态: 生理自然伏案</span>
+            <span id="top-vram" style="color: var(--accent-gold);">VRAM: 850MB</span>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <div class="dialogue-bubble" id="bubble">
+        <div class="dialogue-name" id="char-name-label">茜特拉莉</div>
+        <div class="dialogue-text" id="bubble-text">“……”</div>
+    </div>
+
+    <div class="control-panel">
+        
+        <!-- 实时性能与资源探针 -->
+        <div>
+            <div class="section-title">📊 实时资源与算力探针</div>
+            <div class="profiler-card">
+                <div class="metric-row">
+                    <span class="metric-name">渲染帧率 / 耗时</span>
+                    <span class="metric-val" id="prof-fps"><span class="badge-pill badge-green">60.0 FPS</span> 16.7ms</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-name">当前动作语义类别</span>
+                    <span class="metric-val" id="prof-style"><span class="badge-pill badge-cyan">娇羞偏头 (Shy)</span></span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-name">T5 语义向量编码</span>
+                    <span class="metric-val" id="prof-t5-latency">19.3 ms</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-name">EMAGE 骨骼手势解码</span>
+                    <span class="metric-val" id="prof-decoder-latency">3.2 ms</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-name">GPU 显存实际占用</span>
+                    <span class="metric-val" id="prof-vram" style="color: var(--accent-gold);">850.9 MB (RTX 4060)</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 🎙️ EMAGE 角色对话台词 $	o$ 实时说话手势测试 -->
+        <div>
+            <div class="section-title">🎙️ EMAGE 角色台词手势生成测试</div>
+            <div class="emage-box">
+                <div style="font-size: 11.5px; color: var(--accent-gold); font-weight: bold;">💬 输入剧情中角色的说话内容（台词）：</div>
+                <select class="select-input" id="emage-preset-select" onchange="onSelectEmagePreset(this.value)">
+                    <option value="别一直盯着我看啦！笨蛋旅行者！">😳 “别一直盯着我看啦！笨蛋旅行者！” (娇羞偏头+脸红)</option>
+                    <option value="你好呀！很高兴今天能在这里与你相遇~">🌟 “你好呀！很高兴今天能在这里与你相遇~” (抬手挥手致意)</option>
+                    <option value="哼，就稍微帮你这一次，可别误会了哦！">😼 “哼，就稍微帮你这一次，可别误会了！” (傲娇挺胸耸肩)</option>
+                    <option value="吃饱喝饱，一路走好！往生堂第七十七代堂主胡桃随时效劳~">🦋 “吃饱喝饱，一路走好！往生堂大酬宾~” (调皮双手打拍)</option>
+                    <option value="命运的齿轮已经转动，要来喝一杯魔女的红茶吗？">🔮 “命运的齿轮已经转动，要来喝杯红茶吗？” (优雅指点茶杯)</option>
+                    <option value="我将在此守卫您的安宁，任何宵小都无法近前一步。">👑 “我将在此守卫您的安宁。” (手抚胸口骑士礼)</option>
+                </select>
+
+                <input type="text" class="text-input" id="emage-custom-text" placeholder="输入角色说出的台词，EMAGE自动生成匹配手势..." value="别一直盯着我看啦！笨蛋旅行者！">
+
+                <button class="action-btn" onclick="executeEmageLiveGeneration()">⚡ 实时生成说话手势并驱动骨骼</button>
+
+                <div style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 8px; display: flex; flex-direction: column; gap: 4px;">
+                    <div class="telemetry-row">
+                        <span>推理设备:</span>
+                        <span style="color: var(--accent-cyan);" id="emage-hw">RTX 4060 (CUDA 12.6)</span>
+                    </div>
+                    <div class="telemetry-row">
+                        <span>生成骨骼帧数 / 时长:</span>
+                        <span id="emage-frames">144 帧 (4.8s)</span>
+                    </div>
+                    <div class="telemetry-row">
+                        <span>驱动状态:</span>
+                        <span style="color: var(--accent-green);" id="emage-status">就绪 (差异化语义手势已打通)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 🪑 角色坐姿模式 -->
+        <div>
+            <div class="section-title">🪑 角色坐姿模式</div>
+            <div class="btn-grid">
+                <button class="btn active" id="btn-pose-table" onclick="setPoseMode('table_lean')">🧎‍♀️ 萌系伏桌倾听</button>
+                <button class="btn" id="btn-pose-chin" onclick="setPoseMode('table_chin')">🤔 单手托腮凝视</button>
+                <button class="btn" id="btn-pose-cross" onclick="setPoseMode('table_cross')">🤗 双手交叠趴桌</button>
+                <button class="btn" id="btn-pose-stand" onclick="setPoseMode('stand')">🧍 恢复常态站姿</button>
+            </div>
+        </div>
+
+        <!-- 🔍 视口特写模式 -->
+        <div>
+            <div class="section-title">🔍 视口特写模式</div>
+            <div class="btn-grid">
+                <button class="btn active" id="btn-cam-close" onclick="setCameraView('close')">👀 桌前亲密特写</button>
+                <button class="btn" id="btn-cam-overview" onclick="setCameraView('overview')">🪑 酒馆全景视角</button>
+            </div>
+        </div>
+
+        <!-- 全角色库切换 -->
+        <div>
+            <div class="section-title">全角色库切换</div>
+            <select class="select-input" id="model-select" onchange="onSelectModel(this.value)">
+                <option value="assets/茜特拉莉皮肤_by_原神/茜特拉莉_夏日.pmx" data-name="茜特拉莉">🌟 茜特拉莉（夏日清凉）</option>
+                <option value="assets/胡桃_by_原神/胡桃.pmx" data-name="胡桃">🦋 胡桃（往生堂堂主）</option>
+                <option value="assets/少女_by_原神/少女.pmx" data-name="哥伦比娅">🕊️ 少女·哥伦比娅</option>
+                <option value="assets/尼可_by_原神/尼可.pmx" data-name="尼可">🔮 尼可（魔女会“N”）</option>
+                <option value="assets/奥黛塔_by_原神/奥黛塔.pmx" data-name="奥黛塔">👑 奥黛塔（骑士）</option>
+            </select>
+        </div>
+
+        <!-- 💡 场景光照与氛围调节 -->
+        <div>
+            <div class="section-title">💡 酒馆光照与氛围</div>
+            <div class="btn-grid">
+                <button class="btn" style="font-size: 11.5px;" onclick="applyLightPreset('tavern')">🍺 温暖酒馆</button>
+                <button class="btn" style="font-size: 11.5px;" onclick="applyLightPreset('soft')">🌅 柔和漫射</button>
+                <button class="btn" style="font-size: 11.5px;" onclick="applyLightPreset('raw')">🎨 纯原画无光</button>
+                <button class="btn" style="font-size: 11.5px;" onclick="applyLightPreset('night')">🌙 幽夜微光</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="loader">
+        <div class="spinner"></div>
+        <div class="loader-text" id="loader-status">正在构建 3D 酒馆与解剖学坐姿...</div>
+        <div class="loader-progress" id="load-progress">0%</div>
+    </div>
+
+    <script src="libs/three.min.js"></script>
+    <script src="libs/mmdparser.min.js"></script>
+    <script src="libs/MMDLoader.js"></script>
+    <script src="libs/OutlineEffect.js"></script>
+    <script src="libs/OrbitControls.js"></script>
+
+    <script>
+        let scene, camera, renderer, effect, controls;
+        let ambientLight, mainLight, rimLight, tavernWarmLight;
+        let characterMesh = null;
+        let tableGroup = null, chairGroup = null;
+        let clock = new THREE.Clock();
+
+        let headBone = null, neckBone = null, spineBone = null;
+        let leftArmBone = null, rightArmBone = null, leftForeArm = null, rightForeArm = null;
+        let leftLegBone = null, rightLegBone = null, leftKneeBone = null, rightKneeBone = null;
+
+        let initialHeadRot = new THREE.Euler(), initialNeckRot = new THREE.Euler(), initialSpineRot = new THREE.Euler();
+        let initialBoneRotations = {};
+
+        let mouseX = 0, mouseY = 0;
+        let targetHeadX = 0, targetHeadY = 0;
+        let currentHeadX = 0, currentHeadY = 0;
+        let enableGaze = true;
+        let enableBlink = true;
+
+        let blinkTimer = 0;
+        let isBlinking = false;
+        let blinkProgress = 0;
+
+        let currentPoseMode = 'table_lean';
+        let currentCharacterKey = '茜特拉莉';
+
+        let isEmagePlaying = false;
+        let currentEmageMotion = null;
+        let emagePlayTime = 0;
+
+        let frameCount = 0;
+        let lastFpsUpdate = performance.now();
+        let currentFPS = 60.0;
+        let currentFrameTime = 16.7;
+
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0b0d16);
+
+            ambientLight = new THREE.AmbientLight(0xffeedd, 0.40);
+            scene.add(ambientLight);
+
+            mainLight = new THREE.DirectionalLight(0xfff5ea, 0.52);
+            mainLight.position.set(2.0, 18.0, 8.0);
+            scene.add(mainLight);
+
+            tavernWarmLight = new THREE.PointLight(0xffaa55, 0.65, 35);
+            tavernWarmLight.position.set(0, 15.5, 3.5);
+            scene.add(tavernWarmLight);
+
+            rimLight = new THREE.DirectionalLight(0x7799ee, 0.25);
+            rimLight.position.set(-4, 15, -4);
+            scene.add(rimLight);
+
+            camera = new THREE.PerspectiveCamera(34, window.innerWidth / window.innerHeight, 0.1, 200);
+            camera.position.set(0, 16.5, 17.5);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.outputEncoding = THREE.sRGBEncoding;
+            renderer.toneMapping = THREE.LinearToneMapping;
+            renderer.toneMappingExposure = 0.95;
+            container.appendChild(renderer.domElement);
+
+            effect = new THREE.OutlineEffect(renderer, {
+                defaultThickness: 0.0020,
+                defaultColor: [0.12, 0.1, 0.18],
+                defaultAlpha: 0.85
+            });
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.target.set(0, 14.0, 0.5);
+            controls.maxPolarAngle = Math.PI / 2 + 0.05;
+            controls.minPolarAngle = Math.PI / 4;
+
+            build3DTavernFurniture();
+
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('mousemove', onMouseMove);
+        }
+
+        // 精确构建 3D 酒馆家具（完美贴合自然人体力学坐姿）
+        function build3DTavernFurniture() {
+            const woodMat = new THREE.MeshStandardMaterial({ color: 0x4a2e1b, roughness: 0.7, metalness: 0.05 });
+            const darkWoodMat = new THREE.MeshStandardMaterial({ color: 0x2e1b10, roughness: 0.8, metalness: 0.05 });
+            const trimMat = new THREE.MeshStandardMaterial({ color: 0x9c7444, roughness: 0.4, metalness: 0.3 });
+
+            // 1. 实木椅子 (坐垫位于骨盆下 Y = 10.4, Z = -0.5)
+            chairGroup = new THREE.Group();
+            
+            const seat = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.4, 4.4), woodMat);
+            seat.position.set(0, 10.4, -0.5);
+            chairGroup.add(seat);
+
+            const chairLegGeo = new THREE.CylinderGeometry(0.22, 0.28, 4.5, 12);
+            [[-2.0, 8.25, -2.3], [2.0, 8.25, -2.3], [-2.0, 8.25, 1.3], [2.0, 8.25, 1.3]].forEach(p => {
+                const l = new THREE.Mesh(chairLegGeo, darkWoodMat);
+                l.position.set(p[0], p[1], p[2]);
+                chairGroup.add(l);
+            });
+
+            const backPoleGeo = new THREE.CylinderGeometry(0.2, 0.22, 7.0, 12);
+            const backLeft = new THREE.Mesh(backPoleGeo, darkWoodMat);
+            backLeft.position.set(-2.0, 14.0, -2.4);
+            chairGroup.add(backLeft);
+
+            const backRight = new THREE.Mesh(backPoleGeo, darkWoodMat);
+            backRight.position.set(2.0, 14.0, -2.4);
+            chairGroup.add(backRight);
+
+            const backRest = new THREE.Mesh(new THREE.BoxGeometry(4.6, 2.0, 0.35), woodMat);
+            backRest.position.set(0, 16.0, -2.4);
+            chairGroup.add(backRest);
+
+            scene.add(chairGroup);
+
+            // 2. 实木桌子 (桌面高度 Y = 10.2，Z = 1.5 紧贴腹前，正好舒适承托双手手腕与小臂)
+            tableGroup = new THREE.Group();
+            
+            const tableTop = new THREE.Mesh(new THREE.BoxGeometry(26.0, 0.45, 5.0), woodMat);
+            tableTop.position.set(0, 11.2, 2.2);
+            tableGroup.add(tableTop);
+
+            const trim = new THREE.Mesh(new THREE.BoxGeometry(26.1, 0.12, 5.1), trimMat);
+            trim.position.set(0, 11.0, 2.2);
+            tableGroup.add(trim);
+
+            const legGeo = new THREE.CylinderGeometry(0.32, 0.4, 8.6, 16);
+            [[-8.0, 4.2, -0.8], [8.0, 4.2, -0.8], [-8.0, 4.2, 3.2], [8.0, 4.2, 3.2]].forEach(p => {
+                const leg = new THREE.Mesh(legGeo, darkWoodMat);
+                leg.position.set(p[0], p[1], p[2]);
+                tableGroup.add(leg);
+            });
+
+            // 桌面道具：魔法书
+            const book = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.25, 3.0), new THREE.MeshStandardMaterial({ color: 0x1d3557, roughness: 0.5 }));
+            book.position.set(-4.5, 11.55, 2.0);
+            book.rotation.y = 0.25;
+            tableGroup.add(book);
+
+            // 桌面道具：木质茶杯
+            const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.40, 0.30, 0.9, 16), new THREE.MeshStandardMaterial({ color: 0x774936, roughness: 0.6 }));
+            cup.position.set(4.5, 11.85, 2.0);
+            tableGroup.add(cup);
+
+            scene.add(tableGroup);
+        }
+
+        // 真实人类生理曲度坐姿（大臂自然下垂，小臂自然弯折向前伏案）
+        function applyRealisticSittingPosture(mode = 'table_lean') {
+            if (!characterMesh || !characterMesh.skeleton) return;
+
+            characterMesh.position.set(0, 0, 0);
+
+            // 双腿前屈 85 度坐在椅面上
+            if (leftLegBone) leftLegBone.rotation.set(1.48, 0.05, -0.02);
+            if (rightLegBone) rightLegBone.rotation.set(1.48, -0.05, 0.02);
+            if (leftKneeBone) leftKneeBone.rotation.set(-1.48, 0, 0);
+            if (rightKneeBone) rightKneeBone.rotation.set(-1.48, 0, 0);
+
+            if (spineBone) spineBone.rotation.set(0.12, 0, 0);
+
+                                                            if (mode === 'table_lean' || mode === 'table_cross') {
+                // 双手真正向前伸展，双掌平平整整伏在胸前木桌表面上
+                if (leftArmBone) leftArmBone.rotation.set(-0.80, 0.30, -0.15);
+                if (leftForeArm) leftForeArm.rotation.set(-0.40, 0.60, -0.80);
+
+                if (rightArmBone) rightArmBone.rotation.set(-0.80, -0.30, 0.15);
+                if (rightForeArm) rightForeArm.rotation.set(-0.40, -0.60, 0.80);
+            } else if (mode === 'table_chin') {
+                if (leftArmBone) leftArmBone.rotation.set(-0.80, 0.30, -0.15);
+                if (leftForeArm) leftForeArm.rotation.set(-0.40, 0.60, -0.80);
+
+                // 右手托腮
+                if (rightArmBone) rightArmBone.rotation.set(-1.15, -0.25, 0.20);
+                if (rightForeArm) rightForeArm.rotation.set(0.35, -0.85, 1.45);
+            }
+        }
+
+        function setPoseMode(mode) {
+            currentPoseMode = mode;
+            ['btn-pose-table', 'btn-pose-chin', 'btn-pose-cross', 'btn-pose-stand'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.remove('active');
+            });
+
+            if (mode === 'table_lean') document.getElementById('btn-pose-table').classList.add('active');
+            if (mode === 'table_chin') document.getElementById('btn-pose-chin').classList.add('active');
+            if (mode === 'table_cross') document.getElementById('btn-pose-cross').classList.add('active');
+            if (mode === 'stand') document.getElementById('btn-pose-stand').classList.add('active');
+
+            if (mode === 'stand') {
+                if (characterMesh && characterMesh.skeleton) {
+                    characterMesh.skeleton.bones.forEach(b => {
+                        if (initialBoneRotations[b.name]) b.quaternion.copy(initialBoneRotations[b.name]);
+                    });
+                }
+                tableGroup.visible = false;
+                chairGroup.visible = false;
+                camera.position.set(0, 10.0, 24.0);
+                controls.target.set(0, 9.8, 0);
+            } else {
+                tableGroup.visible = true;
+                chairGroup.visible = true;
+                applyRealisticSittingPosture(mode);
+                setCameraView('close');
+            }
+        }
+
+        function setCameraView(view) {
+            document.getElementById('btn-cam-close').classList.toggle('active', view === 'close');
+            document.getElementById('btn-cam-overview').classList.toggle('active', view === 'overview');
+
+            if (view === 'close') {
+                camera.position.set(0, 14.8, 14.5);
+                controls.target.set(0, 13.0, 0.5);
+            } else {
+                camera.position.set(0, 16.5, 21.0);
+                controls.target.set(0, 11.5, 1.0);
+            }
+        }
+
+        function onSelectEmagePreset(val) {
+            document.getElementById('emage-custom-text').value = val;
+        }
+
+                // 异步调用本地 EMAGE 差异化语义动作流
+        async function executeEmageLiveGeneration() {
+            const textInput = document.getElementById('emage-custom-text');
+            const text = textInput ? textInput.value.trim() : '别一直盯着我看啦！笨蛋旅行者！';
+            if (!text) return;
+
+            const profStyle = document.getElementById('prof-style');
+            const emageStatus = document.getElementById('emage-status');
+            const bubble = document.getElementById('bubble');
+
+            if (emageStatus) emageStatus.innerText = 'GPU 计算动作流...';
+            triggerBubble(`“${text}”`, 5500);
+
+            try {
+                const response = await fetch('http://127.0.0.1:8765/api/emage/synthesize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                });
+
+                const data = await response.json();
+                console.log('[EMAGE Live Data Received]:', data);
+
+                if (data.status === 'success') {
+                    const m = data.metrics;
+                    const profT5 = document.getElementById('prof-t5-latency');
+                    const profDec = document.getElementById('prof-decoder-latency');
+                    const profVram = document.getElementById('prof-vram');
+                    const emageFrames = document.getElementById('emage-frames');
+                    const emageHw = document.getElementById('emage-hw');
+                    const topVram = document.getElementById('top-vram');
+
+                    if (profT5) profT5.innerText = `${m.t5_latency_ms} ms`;
+                    if (profDec) profDec.innerText = `${m.emage_latency_ms} ms`;
+                    if (profVram) profVram.innerText = `${m.vram_used_mb} MB (${m.device})`;
+                    if (profStyle) profStyle.innerHTML = `<span class="badge-pill badge-cyan">${data.semantic_category}</span>`;
+                    if (topVram) topVram.innerText = `VRAM: ${Math.round(m.vram_used_mb)}MB`;
+                    if (emageFrames) emageFrames.innerText = `${data.frameCount} 帧 (${data.duration}s)`;
+                    if (emageHw) emageHw.innerText = m.device;
+                    if (emageStatus) emageStatus.innerText = `驱动中: ${data.semantic_category}`;
+
+                    currentEmageMotion = data;
+                    emagePlayTime = 0;
+                    isEmagePlaying = true;
+                }
+            } catch (err) {
+                console.error('EMAGE 服务连接异常:', err);
+                if (emageStatus) emageStatus.innerText = '未连接到 8765 端口';
+            }
+        }
+
+        function onMouseMove(e) {
+            mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+            mouseY = -(e.clientY / window.innerHeight) * 2 + 1;
+            targetHeadX = mouseX * 0.32;
+            targetHeadY = mouseY * 0.22;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            effect.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function applyLightPreset(type) {
+            if (type === 'tavern') {
+                ambientLight.intensity = 0.40;
+                mainLight.intensity = 0.52;
+            } else if (type === 'soft') {
+                ambientLight.intensity = 0.35;
+                mainLight.intensity = 0.45;
+            } else if (type === 'raw') {
+                ambientLight.intensity = 1.0;
+                mainLight.intensity = 0.0;
+            } else if (type === 'night') {
+                ambientLight.intensity = 0.15;
+                mainLight.intensity = 0.20;
+            }
+        }
+
+        function onSelectModel(url) {
+            const select = document.getElementById('model-select');
+            const opt = select.options[select.selectedIndex];
+            const charName = opt.getAttribute('data-name') || '角色';
+            currentCharacterKey = charName;
+            document.getElementById('char-name-label').innerText = charName;
+            document.getElementById('title-name').innerText = charName + ' · 2.5D 酒馆桌前交互中枢';
+            loadModel(url);
+        }
+
+        function loadModel(modelPath) {
+            const loaderEl = document.getElementById('loader');
+            loaderEl.style.display = 'flex';
+            loaderEl.style.opacity = '1';
+            document.getElementById('load-progress').innerText = '0%';
+            document.getElementById('loader-status').innerText = '正在载入角色并端坐酒馆木椅...';
+
+            if (characterMesh) {
+                scene.remove(characterMesh);
+                if (characterMesh.geometry) characterMesh.geometry.dispose();
+                if (characterMesh.material) {
+                    if (Array.isArray(characterMesh.material)) characterMesh.material.forEach(m => m.dispose());
+                    else characterMesh.material.dispose();
+                }
+                characterMesh = null;
+            }
+
+            const loader = new THREE.MMDLoader();
+            loader.load(
+                modelPath,
+                function (mesh) {
+                    try {
+                        characterMesh = mesh;
+                        scene.add(mesh);
+
+                        if (mesh.material && Array.isArray(mesh.material)) {
+                            mesh.material.forEach(mat => {
+                                if (mat.map) {
+                                    mat.map.encoding = THREE.sRGBEncoding;
+                                    mat.map.needsUpdate = true;
+                                }
+                                if (mat.emissive) mat.emissive.setHex(0x000000);
+                                if (mat.specular) mat.specular.setHex(0x000000);
+                                if (mat.shininess !== undefined) mat.shininess = 0;
+                                if (mat.color) mat.color.setHex(0xffffff);
+                                mat.needsUpdate = true;
+                            });
+                        }
+
+                        if (mesh.skeleton && mesh.skeleton.bones) {
+                            initialBoneRotations = {};
+                            mesh.skeleton.bones.forEach(b => {
+                                initialBoneRotations[b.name] = b.quaternion.clone();
+                                if (b.name === '頭' || b.name === 'Head') headBone = b;
+                                if (b.name === '首' || b.name === 'Neck') neckBone = b;
+                                if (b.name === '上半身' || b.name === 'Spine') spineBone = b;
+                                if (b.name === '左腕') leftArmBone = b;
+                                if (b.name === '右腕') rightArmBone = b;
+                                if (b.name === '左ひじ') leftForeArm = b;
+                                if (b.name === '右ひじ') rightForeArm = b;
+                                if (b.name === '左足') leftLegBone = b;
+                                if (b.name === '右足') rightLegBone = b;
+                                if (b.name === '左ひざ') leftKneeBone = b;
+                                if (b.name === '右ひざ') rightKneeBone = b;
+                            });
+                        }
+
+                        if (headBone) initialHeadRot = headBone.rotation.clone();
+                        if (neckBone) initialNeckRot = neckBone.rotation.clone();
+                        if (spineBone) initialSpineRot = spineBone.rotation.clone();
+
+                        applyRealisticSittingPosture(currentPoseMode);
+
+                        loaderEl.style.opacity = '0';
+                        setTimeout(() => { loaderEl.style.display = 'none'; }, 400);
+
+                        triggerBubble("“（稳稳端坐在椅上，双手自然伏在桌前）……今天想聊些什么呢？”", 4500);
+                    } catch (err) {
+                        console.error('模型装配异常:', err);
+                        loaderEl.style.display = 'none';
+                    }
+                },
+                function (xhr) {
+                    if (xhr.lengthComputable) {
+                        const percent = Math.round((xhr.loaded / xhr.total) * 100);
+                        document.getElementById('load-progress').innerText = percent + '%';
+                    }
+                },
+                function (error) {
+                    console.error('加载失败:', error);
+                    document.getElementById('loader-status').innerHTML = '<span style="color:#ff6b9d">模型加载失败，请检查路径。</span>';
+                }
+            );
+        }
+
+        function setMorphWeight(morphKey, weight) {
+            if (!characterMesh || !characterMesh.morphTargetDictionary) return;
+            const index = characterMesh.morphTargetDictionary[morphKey];
+            if (index !== undefined) {
+                characterMesh.morphTargetInfluences[index] = Math.max(0, Math.min(1, weight));
+            }
+        }
+
+        let bubbleTimeout;
+        function triggerBubble(text, duration = 4000) {
+            const bubble = document.getElementById('bubble');
+            const bubbleText = document.getElementById('bubble-text');
+            bubbleText.innerText = text;
+            bubble.classList.add('active');
+
+            clearTimeout(bubbleTimeout);
+            bubbleTimeout = setTimeout(() => {
+                bubble.classList.remove('active');
+            }, duration);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+            const elapsed = clock.getElapsedTime();
+            const now = performance.now();
+
+            frameCount++;
+            if (now - lastFpsUpdate >= 400) {
+                currentFPS = ((frameCount * 1000) / (now - lastFpsUpdate)).toFixed(1);
+                currentFrameTime = (1000 / currentFPS).toFixed(1);
+                frameCount = 0;
+                lastFpsUpdate = now;
+
+                document.getElementById('top-fps').innerText = `FPS: ${currentFPS}`;
+                document.getElementById('prof-fps').innerHTML = `<span class="badge-pill badge-green">${currentFPS} FPS</span> ${currentFrameTime}ms`;
+            }
+
+            // EMAGE 实时生成的差异化骨骼手势驱动
+            if (isEmagePlaying && currentEmageMotion && characterMesh) {
+                emagePlayTime += delta;
+                const totalDur = currentEmageMotion.duration;
+                if (emagePlayTime >= totalDur) {
+                    isEmagePlaying = false;
+                    currentEmageMotion = null;
+                    document.getElementById('emage-status').innerText = '就绪 (动作播毕已复位)';
+                    applyRealisticSittingPosture(currentPoseMode);
+                } else {
+                    const frameIdx = Math.min(
+                        currentEmageMotion.frameCount - 1,
+                        Math.floor((emagePlayTime / totalDur) * currentEmageMotion.frameCount)
+                    );
+                    const frame = currentEmageMotion.frames[frameIdx];
+                    if (frame) {
+                        // 1. 口型与表情微表情驱动
+                        setMorphWeight('あ', frame.mouth_open);
+                        setMorphWeight('笑い', frame.smile);
+                        setMorphWeight('恥ずかしい', frame.blush);
+
+                        // 2. 差异化台词骨骼动作平滑驱动
+                        if (headBone) {
+                            headBone.rotation.x = THREE.MathUtils.lerp(headBone.rotation.x, frame.head[0], 0.15);
+                            headBone.rotation.y = THREE.MathUtils.lerp(headBone.rotation.y, initialHeadRot.y + frame.head[1], 0.15);
+                        }
+                        if (spineBone) {
+                            spineBone.rotation.x = THREE.MathUtils.lerp(spineBone.rotation.x, frame.spine[0], 0.15);
+                        }
+
+                        // 左右手势差异化平滑插值驱动
+                        if (leftArmBone) {
+                            leftArmBone.rotation.x = THREE.MathUtils.lerp(leftArmBone.rotation.x, frame.arm_l[0], 0.15);
+                            leftArmBone.rotation.y = THREE.MathUtils.lerp(leftArmBone.rotation.y, frame.arm_l[1], 0.15);
+                            leftArmBone.rotation.z = THREE.MathUtils.lerp(leftArmBone.rotation.z, frame.arm_l[2], 0.15);
+                        }
+                        if (leftForeArm) {
+                            leftForeArm.rotation.x = THREE.MathUtils.lerp(leftForeArm.rotation.x, frame.forearm_l[0], 0.15);
+                            leftForeArm.rotation.y = THREE.MathUtils.lerp(leftForeArm.rotation.y, frame.forearm_l[1], 0.15);
+                            leftForeArm.rotation.z = THREE.MathUtils.lerp(leftForeArm.rotation.z, frame.forearm_l[2], 0.15);
+                        }
+
+                        if (rightArmBone) {
+                            rightArmBone.rotation.x = THREE.MathUtils.lerp(rightArmBone.rotation.x, frame.arm_r[0], 0.15);
+                            rightArmBone.rotation.y = THREE.MathUtils.lerp(rightArmBone.rotation.y, frame.arm_r[1], 0.15);
+                            rightArmBone.rotation.z = THREE.MathUtils.lerp(rightArmBone.rotation.z, frame.arm_r[2], 0.15);
+                        }
+                        if (rightForeArm) {
+                            rightForeArm.rotation.x = THREE.MathUtils.lerp(rightForeArm.rotation.x, frame.forearm_r[0], 0.15);
+                            rightForeArm.rotation.y = THREE.MathUtils.lerp(rightForeArm.rotation.y, frame.forearm_r[1], 0.15);
+                            rightForeArm.rotation.z = THREE.MathUtils.lerp(rightForeArm.rotation.z, frame.forearm_r[2], 0.15);
+                        }
+                    }
+                }
+            } else if (characterMesh && headBone && neckBone) {
+                if (enableGaze) {
+                    currentHeadX += (targetHeadX - currentHeadX) * 0.08;
+                    currentHeadY += (targetHeadY - currentHeadY) * 0.08;
+
+                    headBone.rotation.y = initialHeadRot.y + currentHeadX * 0.75;
+                    headBone.rotation.x = -0.05 - currentHeadY * 0.45;
+
+                    neckBone.rotation.y = initialNeckRot.y + currentHeadX * 0.3;
+                    neckBone.rotation.x = -0.02 - currentHeadY * 0.2;
+                }
+
+                if (spineBone && currentPoseMode !== 'stand') {
+                    const breath = Math.sin(elapsed * 2.0) * 0.008;
+                    spineBone.rotation.x = 0.16 + breath;
+                }
+            }
+
+            if (enableBlink && characterMesh) {
+                blinkTimer += delta;
+                if (!isBlinking && blinkTimer > (3.0 + Math.random() * 2.5)) {
+                    isBlinking = true;
+                    blinkTimer = 0;
+                    blinkProgress = 0;
+                }
+
+                if (isBlinking) {
+                    blinkProgress += delta * 12;
+                    if (blinkProgress <= 1) {
+                        setMorphWeight('まばたき', Math.sin(blinkProgress * Math.PI));
+                    } else {
+                        setMorphWeight('まばたき', 0);
+                        isBlinking = false;
+                    }
+                }
+            }
+
+            controls.update();
+            effect.render(scene, camera);
+        }
+
+        function startApp() {
+            initScene();
+            loadModel('assets/茜特拉莉皮肤_by_原神/茜特拉莉_夏日.pmx');
+            animate();
+        }
+        startApp();
+    </script>
+</body>
+</html>

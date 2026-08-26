@@ -25,6 +25,7 @@ __pycache__/
 .pytest_cache/
 venv/
 env/
+.venv/
 
 *.log
 tmp/
@@ -32,19 +33,39 @@ temp/
 .gemini/
 server/data/vector_store/
 
-# User-owned character, scene, motion, voice and sensor data stay external.
+# 3D models & Large generative weights (DO NOT UPLOAD)
+*.pmx
+*.vrm
+*.fbx
+*.obj
+*.gltf
+*.glb
+*.pth
+*.pt
+*.bin
+*.safetensors
+*.onnx
+*.h5
+*.tga
+*.psd
+*.zip
+*.7z
+*.rar
+**/assets/
+**/assets/vrm/
+**/assets/*_by_原神/
 assets/private/
 user-data/
 models/
 motions/
 recordings/
 
-# Local experiments and purchased scene source files are not distributable.
+# Local experiments and scene sources
 scratch/
 apps/wallpaper/public/assets/scenes/
 
-# Machine-local Companion configuration may contain private absolute asset paths.
+# Machine-local Companion config
 rayure.local.json
 
-# This repo is pnpm-managed; a stray npm lockfile only adds noise.
+# pnpm-managed repo
 package-lock.json
