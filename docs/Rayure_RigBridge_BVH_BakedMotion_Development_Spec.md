@@ -6,10 +6,19 @@
 > 基线提交：[`94db6e2592a31e6b9e85b22f750e993a297d204b`](https://github.com/ApolloEddy/Rayure/tree/94db6e2592a31e6b9e85b22f750e993a297d204b)  
 > Spec 修订：`R2`（2026-08-26 午后 BrainStorm 锁定版）
 > 修订时执行基线：`feat/offline-rig-pipeline@a7581b5`（Phase 0–1 已完成）
-> 当前执行状态：**Phase 2 HRS-only PoC 已执行；当前为 `POC-FAIL`，生产阶段停在证据门。**
+> 当前执行状态：**Phase 2 的 HRS-only 失败记录仍为历史证据；2026-08-26 用户增补已开启两条插件原生映射试验。Citrali PMX 的原始日文 → HRS `MMD FK` 路线已通过，整体 POC/生产门仍未宣称通过。**
 > 规范词：**MUST / MUST NOT / SHOULD / MAY** 分别表示必须、禁止、应该、可选。
 
 R2 的决策优先于本文早期段落和 Phase 0 历史报告中的旧措辞；已提交的 Phase 0–1 仍是有效证据，不改写历史。本文所称 **HRS** 专指开源第三方扩展 Humanoid Remap Studio 0.1.66（其当前市场名为“Rig Bridge”），**不是** Kajin 的付费产品 RigBridge，也不是 Blender Foundation 官方插件。
+
+### R3 用户增补（2026-08-26）
+
+以下条款由用户明确指定，覆盖本 Spec 中“失败后不得切换第二套 retarget 工具”的旧试验策略，但不放宽语义、姿态、覆盖率或纯播放门禁：
+
+1. 保留两条**插件原生**映射路线，按顺序尝试：Route A 使用 MMD Tools 原始日文骨名并走 HRS 自带 `MMD FK` 预设；只有 A 的门禁失败时，才从干净 scene 重导并尝试 Route B（MMD Tools 自带 `INTERNAL` 字典，再调用 HRS 通用识别或 ARP 自带预设/识别能力）。
+2. 两条路线不得拼接、互相填槽或由 Rayure 新增 alias、正则、几何猜骨或翻译字典；每条路线都必须独立完成完整 role→bone 语义审计、核心覆盖率、rest pose、bake 和 GLB clean-import 验证。
+3. 某条路线通过后立即选定该路线；另一条仅保留为可复核的 fallback 证据。当前 Citrali PMX 为 Route A 通过，Route B 的 HRS 通用识别为 13/15 核心，未被选用。
+4. MMD 贴图在直接导入后，允许调用 MMD Tools 自带 `convert_materials(use_principled=True, clean_nodes=True)` 迁移为 Blender 标准材质，再由 Blender glTF exporter 输出 GLB；不得写项目自有材质转换器。glTF 只承诺基础颜色/alpha 等标准通道，toon/sphere 等 MMD 专有语义不承诺逐项等价。
 
 ---
 
@@ -37,7 +46,7 @@ R2 的决策优先于本文早期段落和 Phase 0 历史报告中的旧措辞�
 5. **HRS 状态门禁只是必要条件。** `hrs_can_execute_retarget=true` 仍可能语义错位；逐角色映射审计、动作结果和纯播放证据共同决定模型是否通过。
 6. **多模型族而非只看 MMD。** PoC 使用四个目标槽位、至少三个不同常见 rig 家族；同一角色文件里的两个 armature 不得虚增为两个独立家族。
 7. **无命名骨架单列能力标签。** `Param001…` 合成用例必须执行；失败会阻止“与骨名无关”的宣传，但不会被自研 fallback 掩盖。
-8. **HRS 是唯一 retarget/bake 工具。** 本项目不引入第二套 retarget 工具；HRS 无法处理的模型按稳定失败记录，等待输入或工具链决策，不用自研补救。
+8. **HRS 是 Route A 的 retarget/bake 工具。** 2026-08-26 的 R3 增补允许在 A 失败时尝试 ARP/HRS 已有原生能力作为 Route B；两条路线均不得引入 Rayure 自研补救，且必须独立通过语义审计与 GLB 门禁。
 
 ---
 
@@ -147,10 +156,12 @@ Blender 的体积属于离线构建机成本；最终 bundle、Companion、Wallp
 
 若生产 builder 需要 canonical 中间产物，只允许在“直接导入 + 轴/单位记录 + 世界姿态门”通过后由 Blender `import → export GLB` 生成。该 GLB 用于缓存和可复现构建，不代表目标骨架被改造成 ARDY 27 关节。
 
-### ADR-005：HRS-only 自动主路径
+### ADR-005：HRS 自动主路径（R2 历史；R3 增补 fallback）
 
-- **唯一自动路径**：Blender headless + HRS 公开 operator。PoC 的 `3/4` 统计只计算此路径；不得手填 HRS slot 或插入自研算法。
-- HRS 无法处理的模型必须生成独立失败报告；不得改写失败记录、切换第二套 retarget 工具或宣传为“任意模型全自动”。
+本节保留 R2 的 HRS-only 证据边界；当前执行以文首 R3 用户增补为准。也就是说，HRS 仍是 Route A 的主路径，Route B 只允许调用 ARP/HRS 已有原生能力，不得变成 Rayure 自研的第二套 retarget 或映射实现。
+
+- **Route A 自动主路径**：Blender headless + HRS 公开 operator。历史 PoC 的 `3/4` 统计只计算此路径；不得手填 HRS slot 或插入自研算法。
+- Route A 无法处理的模型可按 R3 从干净 scene 进入 Route B；两条路线必须独立出报告并通过同一语义门禁，不能改写失败记录或宣传为“任意模型全自动”。
 - KBSBAUDRICE/Retarget 不作为 R2 主路径：其名字/profile 映射机制不能回答无命名骨架用例。Kajin RigBridge 也暂不进入锁定工具链，除非后续独立核验公开 API、headless 自动化、许可证与真实模型结果并由用户拍板替换。
 
 ---

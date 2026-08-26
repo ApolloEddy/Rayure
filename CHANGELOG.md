@@ -4,6 +4,12 @@
 
 ## [Unreleased] - 2026-08-26
 
+### 离线骨架标准化与烘焙动作管线（用户增补：双原生映射与 MMD 贴图）
+
+- 保留两条插件原生映射路线并按门禁择一：优先 MMD Tools 原始日文骨名 → Rig Bridge `MMD FK`；仅在该路线失败时尝试 MMD Tools `INTERNAL` → HRS 通用/Auto-Rig Pro 原生能力；不拼接结果、不新增 Rayure 字典或 alias；
+- 在 Citrali PMX 上验证 Route A 核心 15/15、rest-pose gate 通过，并完成 100 帧 ARDY BVH → 目标模型原骨架 bake；Route B 的 HRS 通用识别为 13/15，保留为 fallback 证据但未选用；
+- 使用 MMD Tools 自带 `convert_materials(use_principled=True, clean_nodes=True)` 迁移材质后，动作 GLB clean-import 验证到 7 张嵌入图片、24/24 材质 Base Color 与 Alpha 纹理连接和 1 个动画 armature；MMD toon/sphere 专有渲染语义不承诺逐项等价；详见 `tools/rig-pipeline/reports/citrali-mmd-native-route.md`。
+
 ### 离线骨架标准化与烘焙动作管线（Phase 2 — HRS-only PoC，`POC-FAIL`）
 
 - 新增 `tools/rig-pipeline/blender/rig_bridge_driver.py`：以 Blender headless 为边界，按原始格式直接导入目标模型，执行严格世界姿态门、HRS `auto_guess` → 角色语义审计 → `execute_retarget`/bake、目标 rig 指纹检查、GLB 导出和无 addon clean import；driver 不包含 alias、猜骨、手工 slot 或第二套 retarget 算法；

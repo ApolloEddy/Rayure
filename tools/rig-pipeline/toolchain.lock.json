@@ -96,6 +96,37 @@
     "headlessEnableVerified": true,
     "headlessEvidence": "background --factory-startup + env vars above: hrs.auto_guess/hrs.execute_retarget/hrs.init_slots/hrs.assign_selected_bone/hrs.pick_armature registered; all 8 gate scene props present (hrs_source_armature..hrs_target_profile). Add-on module resolves to bl_ext.user_default.humanoid_remap_studio."
   },
+  "mmdTools": {
+    "extensionId": "mmd_tools",
+    "name": "MMD Tools",
+    "version": "4.5.13",
+    "source": "user-provided package, copied to the isolated Blender profile",
+    "localPath": "D:/Dev/Auto-Rig-Pro/packages/mmd_tools_v4.5.13.zip",
+    "sha256": "261CEC171596C79FD204F39CC1227FFADA3CED73626F27B5F915FD9DDA619A69",
+    "blenderVersionMin": "4.2.0",
+    "license": "GPL-3.0-or-later",
+    "nativeOperatorsUsed": [
+      "mmd_tools.import_model",
+      "mmd_tools.convert_materials"
+    ],
+    "nativeMaterialConversion": "MMD shader nodes -> Blender Principled/image nodes before glTF export",
+    "headlessVerified": true
+  },
+  "autoRigPro": {
+    "name": "Auto-Rig Pro + Quick Rig",
+    "version": "3.78.32 + 1.27.21",
+    "source": "user-provided package, copied to the isolated Blender profile",
+    "localPaths": [
+      "D:/Dev/Auto-Rig-Pro/packages/auto_rig_pro_3.78.32.zip",
+      "D:/Dev/Auto-Rig-Pro/packages/auto_rig_pro_quick_rig_1.27.21.zip"
+    ],
+    "sha256": [
+      "2BCEEB869E538D1ADFA307D83DF296452029DD147B0CC15E162D16D9CAFA04E1",
+      "9DCFCCF3E1E3E7239F4DB66C5D595CAB0EC298C701871F065644251B0C0420BB"
+    ],
+    "status": "fallback-candidate",
+    "note": "Native Quick Rig mixamo fuzzy trial on the Citrali MMD skeleton returned semantically wrong assignments; not selected when the HRS MMD FK route passes. AI marker package was not installed."
+  },
   "converter": {
     "name": "ardy_to_bvh (strict ARDY CoreSkeleton27 -> BVH format bridge)",
     "version": "1.0.0",

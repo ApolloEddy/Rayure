@@ -54,6 +54,7 @@ baked Actions → GLB + character bundle manifest → Rayure 纯播放（GLTFLoa
 - **Phase 0（✅ 完成）**：工具链锁定 ✅、ARDY profile 草案 ✅、基线审计 ✅（8 条 §1.2 声明全部验证）、Rig Bridge headless 启用验证 ✅、PoC 输入矩阵 ✅。
 - **Phase 1（✅ 完成）**：`ardy_to_bvh.py` 严格转换器（零目标模型知识）+ `pipeline-failure.v1` schema（14 code）+ 31 个 unittest 通过 + golden fixture + Blender 原生 importer round-trip **PASS**（旋转 0.0319°≤0.25°、根平移 0.01µm≤1mm、fps=20）。详见 `reports/phase1-verification.md`。
 - **Phase 2（⚠️ POC-FAIL，已停在证据门）**：`blender/rig_bridge_driver.py` 已完成 HRS-only 的直接导入 → posture gate → `auto_guess` → 语义审计 → retarget/bake → GLB 导出/clean import。VRM 参考槽位与一个 FBX 容器槽位各自的 3 类动作均通过；MMD 槽位出现可执行但 12/15 核心角色 off-by-one，Rigify/custom 槽位未通过 HRS 自动执行门。两类通过样本实际都被 HRS 识别为 `VRM/VRoid`，尚未覆盖 3 个独立 rig 家族，故不进入 Phase 3。详见 `reports/phase2-poc-evidence.md`。
+- **2026-08-26 用户增补验证**：两条插件原生映射路线保留为有序尝试（原始日文 → HRS `MMD FK` 优先；失败才尝试 MMD Tools `INTERNAL` → HRS 通用/ARP 原生能力），不拼接、不新增项目字典。Citrali PMX 的 Route A 已达 15/15 核心并完成 bake；MMD Tools 原生 `convert_materials` 后，带基础贴图的动作 GLB clean-import 通过。详见 `reports/citrali-mmd-native-route.md`。
 - **Phase 3–8**：`POC-PASS` 门禁通过后才进入生产重构。
 
 ## 约束速查（spec §3）
