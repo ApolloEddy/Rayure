@@ -19,6 +19,9 @@ tools/rig-pipeline/
     rig_bridge_driver.py       # Phase 2：最薄 Blender driver，只调公开 API
     poc_retarget_and_bake.py   # Phase 2
     build_character_bundle.py  # Phase 3（POC-PASS 后）
+  verify/
+    blender_bvh_dump.py        # Phase 1：Blender 原生 importer round-trip dump
+    roundtrip_verify.py        # Phase 1：FK 参考比对驱动（PASS/FAIL）
   tests/
     test_ardy_to_bvh.py        # Phase 1
     test_failure_schema.py     # Phase 1
@@ -31,7 +34,7 @@ tools/rig-pipeline/
 | 组件 | 版本 | 位置 |
 |---|---|---|
 | Blender | 4.2.23 LTS（便携） | `scratch/rig-pipeline-poc/tools/blender-4.2.23-windows-x64/` |
-| Rig Bridge (Humanoid Remap Studio) | 0.1.66 | 同上 `4.2/extensions/user/default/humanoid_remap_studio/` |
+| Rig Bridge (Humanoid Remap Studio) | 0.1.66 | 同上 `4.2/extensions/user_default/humanoid_remap_studio/` |
 | glTF exporter | 内置 io_scene_gltf2 | 随 Blender |
 | ARDY | 本地 checkout `D:/Dev/ardy-spike/ardy` + checkpoint `ARDY-Core-RP-20FPS-Horizon40` | 指纹见 toolchain.lock.json |
 
@@ -50,7 +53,7 @@ baked Actions → GLB + character bundle manifest → Rayure 纯播放（GLTFLoa
 ## 进度
 
 - **Phase 0（✅ 完成）**：工具链锁定 ✅、ARDY profile 草案 ✅、基线审计 ✅（8 条 §1.2 声明全部验证）、Rig Bridge headless 启用验证 ✅、PoC 输入矩阵 ✅。
-- **Phase 1（待开始）**：ARDY→BVH 严格转换器 + schema + 测试 + round-trip。
+- **Phase 1（✅ 完成）**：`ardy_to_bvh.py` 严格转换器（零目标模型知识）+ `pipeline-failure.v1` schema（14 code）+ 31 个 unittest 通过 + golden fixture + Blender 原生 importer round-trip **PASS**（旋转 0.0319°≤0.25°、根平移 0.01µm≤1mm、fps=20）。详见 `reports/phase1-verification.md`。
 - **Phase 2（待开始）**：Rig Bridge retarget/bake PoC → `POC-PASS`/`POC-FAIL`。
 - **Phase 3–8**：`POC-PASS` 门禁通过后才进入生产重构。
 

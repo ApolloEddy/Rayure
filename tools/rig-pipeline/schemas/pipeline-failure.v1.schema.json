@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rayure.rig-pipeline-failure.v1",
+  "title": "Rayure rig-pipeline failure report",
+  "description": "Structured failure report emitted by any offline rig-pipeline stage (ARDY->BVH converter, Blender driver, bundle builder). Model fields are nullable because converter-stage failures involve no model.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "runId", "stage", "code", "message"],
+  "properties": {
+    "schema": {
+      "const": "rayure.rig-pipeline-failure.v1",
+      "description": "Fixed schema identifier."
+    },
+    "runId": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9-]+$",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Unique id for the failing run (e.g. uuid4)."
+    },
+    "stage": {
+      "type": "string",
+      "enum": ["ardy-to-bvh", "rig-detection", "retarget-bake", "export-glb", "bundle-build", "runtime-load"],
+      "description": "Which pipeline stage failed."
+    },
+    "code": {
+      "type": "string",
+      "enum": [
+        "INPUT_INVALID",
+        "ARDY_REFERENCE_SKELETON_MISSING",
+        "IMPORT_FAILED",
+        "RIG_BRIDGE_NOT_INSTALLED",
+        "RIG_BRIDGE_API_MISMATCH",
+        "RIG_DETECTION_FAILED",
+        "REST_POSE_REJECTED",
+        "SOURCE_MAPPING_FAILED",
+        "RETARGET_FAILED",
+        "BAKE_VALIDATION_FAILED",
+        "EXPORT_FAILED",
+        "TOOL_CAPABILITY_MISMATCH",
+        "RUNTIME_LOAD_FAILED",
+        "BAKED_CLIP_NOT_FOUND"
+      ],
+      "description": "Stable machine-readable failure code (spec §6.7)."
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "Human-readable failure description. May quote external tool diagnostics verbatim; must NOT propose alias/bone-guess suggestions."
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "motionBasename": { "type": ["string", "null"] },
+        "motionSha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "modelBasename": { "type": ["string", "null"] },
+        "modelSha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "detail": { "type": ["string", "null"], "maxLength": 2000 }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "blenderVersion": { "type": ["string", "null"] },
+        "rigBridgeVersion": { "type": ["string", "null"] },
+        "bvhToolVersion": { "type": ["string", "null"] },
+        "gltfExporterVersion": { "type": ["string", "null"] }
+      }
+    },
+    "externalToolStatus": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "autoSummary": { "type": "string" },
+        "autoDetail": { "type": "string" },
+        "canExecuteRetarget": { "type": "boolean" },
+        "postureGatePassed": { "type": ["boolean", "null"] },
+        "coverageReady": { "type": ["boolean", "null"] }
+      },
+      "required": ["autoSummary", "autoDetail", "canExecuteRetarget"]
+    },
+    "fallbackAttempted": {
+      "type": "boolean",
+      "description": "Must be false for every automatic path; any fallback = spec violation."
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp. Optional (kept out of determinism-critical output where not required)."
+    }
+  }
+}

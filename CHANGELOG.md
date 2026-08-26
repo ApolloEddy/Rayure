@@ -13,6 +13,17 @@
 - 基线审计确认 spec §1.2 的 8 条运行时适配声明全部成立（`bone-remapper.ts` 自研 alias、`canonical-rig-adapter.ts` world→parent-local 硬适配、`core-bone-names.ts` 候选名表、`MotionController` VMD 专用播放器、网关扩展名白名单无 glb 等），并登记禁改符号清单（`STANDARD_BONE_ALIASES` / `CORE_BONE_CANDIDATES` / `remapModelBones` / `CanonicalMotionRigAdapter` / `resolveBone`）；
 - 记录基线漂移：spec 基线 `94db6e2` → 当前 HEAD `8251c4b` 仅两个恢复性审计修复提交（`a48f2ac`、`8251c4b`），当前 HEAD 上重验后 8 条声明不变。
 
+### 离线骨架标准化与烘焙动作管线（Phase 1 — ARDY→BVH 严格转换器 + schema + round-trip）
+
+- 新增 `tools/rig-pipeline/ardy_to_bvh.py`（v1.0.0）：严格 ARDY CoreSkeleton27→BVH 格式桥。Hips 为唯一平移通道，其余 26 关节仅旋转；Euler 通道固定 `Zrotation Yrotation Xrotation`（scipy `as_euler('ZYX')` 反解 + ±360 unwrap）；确定性输出（相同 input bytes + profile + 工具版本 → 相同 BVH 字节）；拒绝 `--target-model/--bone-map/--guess-axis/--scale-to-character/--fix-feet`（CLI 级 exit 4）；失败路径非零退出 + `rayure.rig-pipeline-failure.v1` 报告 + 不产出部分 BVH；
+- 新增 `schemas/pipeline-failure.v1.schema.json`：14 个稳定失败码（INPUT_INVALID / ARDY_REFERENCE_SKELETON_MISSING / IMPORT_FAILED / RIG_BRIDGE_NOT_INSTALLED / RIG_BRIDGE_API_MISMATCH / RIG_DETECTION_FAILED / REST_POSE_REJECTED / SOURCE_MAPPING_FAILED / RETARGET_FAILED / BAKE_VALIDATION_FAILED / EXPORT_FAILED / TOOL_CAPABILITY_MISMATCH / RUNTIME_LOAD_FAILED / BAKED_CLIP_NOT_FOUND），stage/input/toolchain/externalToolStatus 结构齐备；
+- `core-skeleton-27.v1.json` 草案升级为全精度：27 个 `restOffsetMeters` 全部内联（源自 `joints.p`，经 `bind_rig_transform` 父相对差交叉验证，25/27 精确一致、Thumb 两关节差 19mm——故只用 joints.p），endSites 修正为 7 叶（含 Head）；
+- 新增 `tests/test_ardy_to_bvh.py` + `tests/test_failure_schema.py`：31 个 unittest 全绿（工具链 venv 无 pytest/jsonschema，改用手写极简 validator）。覆盖确定性 hash、golden 字节匹配、非法 shape/缺字段/批量>1/0 帧/NaN/Inf/错 fps/超大输入（monkeypatch 上限）/截断文件/profile 缺失/CLI exit/禁止符号/14-code 枚举/失败报告 conform；
+- 新增 golden fixtures：`golden_rest.npz`（sha256 `ba95faa4…`）/ `golden_rest.bvh`（sha256 `b9a737bb…`）/ `conversion.json`，构造器 `fixtures/build_fixtures.py` 确定性可重放；
+- 新增 `verify/`：`blender_bvh_dump.py`（headless Blender 原生 `io_anim_bvh` importer 导入并 dump rest/pose 矩阵）+ `roundtrip_verify.py`（ARDY FK 参考比对）。round-trip **PASS**：最大旋转误差 0.0319°（容差 0.25°）、最大平移误差 1.04µm（容差 1mm）、根平移 0.01µm、scene fps=20、帧契约 BVH 帧 k→Blender 帧 k+1（importer 跳过内部 anim_data placeholder）；
+- `toolchain.lock.json` 新增 `converter` 块（工具链 python 3.11.9 / numpy 1.26.4 / scipy 1.17.1）；报告新增 `phase1-verification.md` 与 `phase1-ardy-rest-offsets.md`；
+- 记录 Euler 契约三方一致端到端确认：文件通道 `Z Y X` → importer `Euler((X,Y,Z),'XYZ')`=Rz@Ry@Rx == scipy 内置 'ZYX' == ARDY `load_bvh_animation` 重建。
+
 ### 恢复性审计与修复
 
 #### 修复

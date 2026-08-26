@@ -1,0 +1,24 @@
+{
+  "schema": "rayure.rig-pipeline-conversion.v1",
+  "runId": "golden-fixture-v1",
+  "status": "ok",
+  "input": {
+    "file": "golden_rest.npz",
+    "sha256": "ba95faa470ef2783b55edcbe7715e80619e2183c8452e41026eea49993422893",
+    "bytes": 6692,
+    "frames": 3,
+    "fps": 20.0
+  },
+  "output": {
+    "file": "golden_rest.bvh",
+    "sha256": "b9a737bb50cdb9969cf4f4e3501d8241304dc90ce2f29ba824fc264d57803737",
+    "bytes": 6143
+  },
+  "profile": "core-skeleton-27.v1",
+  "toolchain": {
+    "bvhToolVersion": "ardy_to_bvh 1.0.0",
+    "profileVersion": "0.1.0"
+  },
+  "determinism": "same input bytes + profile + tool version -> identical BVH hash",
+  "createdAt": "2026-08-26T06:10:33.238147+00:00"
+}

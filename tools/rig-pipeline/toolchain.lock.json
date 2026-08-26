@@ -96,6 +96,18 @@
     "headlessEnableVerified": true,
     "headlessEvidence": "background --factory-startup + env vars above: hrs.auto_guess/hrs.execute_retarget/hrs.init_slots/hrs.assign_selected_bone/hrs.pick_armature registered; all 8 gate scene props present (hrs_source_armature..hrs_target_profile). Add-on module resolves to bl_ext.user_default.humanoid_remap_studio."
   },
+  "converter": {
+    "name": "ardy_to_bvh (strict ARDY CoreSkeleton27 -> BVH format bridge)",
+    "version": "1.0.0",
+    "profileVersion": "0.1.0",
+    "toolchainPython": "D:/Dev/ardy-spike/.venv/Scripts/python.exe",
+    "python": "3.11.9",
+    "dependencies": {
+      "numpy": "1.26.4",
+      "scipy": "1.17.1"
+    },
+    "note": "Pure-format bridge, no target-model knowledge (spec §3.2). Deterministic BVH bytes for identical input+profile+version; locked in the committed golden fixture. Requires numpy (input arrays) + scipy (Rotation.as_euler 'ZYX' decomposition, the round-trip contract with ARDY load_bvh_animation). No pytest/jsonschema in this venv, so the Phase 1 suite runs under stdlib unittest."
+  },
   "bvhMotionRetargeter": {
     "name": "BVH Motion Retargeter (BacteriaJun)",
     "unreachable": true,

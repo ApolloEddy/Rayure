@@ -8,34 +8,34 @@
     "localCheckout": "D:/Dev/ardy-spike/ardy (非 git 副本)",
     "fingerprints": "见 toolchain.lock.json ardy.contentFingerprints"
   },
-  "jointSet": [
-    {"index": 0,  "name": "Hips",            "parent": null},
-    {"index": 1,  "name": "Spine",           "parent": "Hips"},
-    {"index": 2,  "name": "Spine1",          "parent": "Spine"},
-    {"index": 3,  "name": "Spine2",          "parent": "Spine1"},
-    {"index": 4,  "name": "Spine3",          "parent": "Spine2"},
-    {"index": 5,  "name": "Neck",            "parent": "Spine3"},
-    {"index": 6,  "name": "Head",            "parent": "Neck"},
-    {"index": 7,  "name": "RightShoulder",   "parent": "Spine3"},
-    {"index": 8,  "name": "RightArm",        "parent": "RightShoulder"},
-    {"index": 9,  "name": "RightForeArm",    "parent": "RightArm"},
-    {"index": 10, "name": "RightHand",       "parent": "RightForeArm"},
-    {"index": 11, "name": "RightHandEnd",    "parent": "RightHand"},
-    {"index": 12, "name": "RightHandThumb1", "parent": "RightHand"},
-    {"index": 13, "name": "LeftShoulder",    "parent": "Spine3"},
-    {"index": 14, "name": "LeftArm",         "parent": "LeftShoulder"},
-    {"index": 15, "name": "LeftForeArm",     "parent": "LeftArm"},
-    {"index": 16, "name": "LeftHand",        "parent": "LeftForeArm"},
-    {"index": 17, "name": "LeftHandEnd",     "parent": "LeftHand"},
-    {"index": 18, "name": "LeftHandThumb1",  "parent": "LeftHand"},
-    {"index": 19, "name": "RightUpLeg",      "parent": "Hips"},
-    {"index": 20, "name": "RightLeg",        "parent": "RightUpLeg"},
-    {"index": 21, "name": "RightFoot",       "parent": "RightLeg"},
-    {"index": 22, "name": "RightToeBase",    "parent": "RightFoot"},
-    {"index": 23, "name": "LeftUpLeg",       "parent": "Hips"},
-    {"index": 24, "name": "LeftLeg",         "parent": "LeftUpLeg"},
-    {"index": 25, "name": "LeftFoot",        "parent": "LeftLeg"},
-    {"index": 26, "name": "LeftToeBase",     "parent": "LeftFoot"}
+  "joints": [
+    {"index": 0,  "name": "Hips",            "parent": null,          "restOffsetMeters": [0.0, 0.0, 0.0]},
+    {"index": 1,  "name": "Spine",           "parent": 0,             "restOffsetMeters": [0.0, 0.0709891, -0.0473261]},
+    {"index": 2,  "name": "Spine1",          "parent": 1,             "restOffsetMeters": [0.0, 0.093214218, -0.016436189]},
+    {"index": 3,  "name": "Spine2",          "parent": 2,             "restOffsetMeters": [0.0, 0.094292013, -0.008249533]},
+    {"index": 4,  "name": "Spine3",          "parent": 3,             "restOffsetMeters": [0.0, 0.094652196, -9.5e-08]},
+    {"index": 5,  "name": "Neck",            "parent": 4,             "restOffsetMeters": [0.0, 0.248462024, 0.03549435]},
+    {"index": 6,  "name": "Head",            "parent": 5,             "restOffsetMeters": [0.0, 0.128169788, 0.02259967]},
+    {"index": 7,  "name": "RightShoulder",   "parent": 3,             "restOffsetMeters": [-0.0319949, 0.267424241, 0.05332453]},
+    {"index": 8,  "name": "RightArm",        "parent": 7,             "restOffsetMeters": [-0.158908, -5.5e-08, 0.0]},
+    {"index": 9,  "name": "RightForeArm",    "parent": 8,             "restOffsetMeters": [-0.295436, -1.02e-07, 0.0]},
+    {"index": 10, "name": "RightHand",       "parent": 9,             "restOffsetMeters": [-0.232652, -8.1e-08, 0.0]},
+    {"index": 11, "name": "RightHandEnd",    "parent": 10,            "restOffsetMeters": [-0.0696115, -2.4e-08, 0.0]},
+    {"index": 12, "name": "RightHandThumb1", "parent": 10,            "restOffsetMeters": [-0.027844594, -0.018563062, 0.046407716]},
+    {"index": 13, "name": "LeftShoulder",    "parent": 3,             "restOffsetMeters": [0.0319949, 0.267424241, 0.05332453]},
+    {"index": 14, "name": "LeftArm",         "parent": 13,            "restOffsetMeters": [0.158908, 0.0, 0.0]},
+    {"index": 15, "name": "LeftForeArm",     "parent": 14,            "restOffsetMeters": [0.295436, 0.0, 0.0]},
+    {"index": 16, "name": "LeftHand",        "parent": 15,            "restOffsetMeters": [0.232652, 0.0, 0.0]},
+    {"index": 17, "name": "LeftHandEnd",     "parent": 16,            "restOffsetMeters": [0.0696115, 0.0, 0.0]},
+    {"index": 18, "name": "LeftHandThumb1",  "parent": 16,            "restOffsetMeters": [0.0278446, -0.018563053, 0.046407716]},
+    {"index": 19, "name": "RightUpLeg",      "parent": 0,             "restOffsetMeters": [-0.0949182, -0.0277289, 0.0]},
+    {"index": 20, "name": "RightLeg",        "parent": 19,            "restOffsetMeters": [0.0, -0.412118, 0.0]},
+    {"index": 21, "name": "RightFoot",       "parent": 20,            "restOffsetMeters": [-0.0, -0.456091, 0.0]},
+    {"index": 22, "name": "RightToeBase",    "parent": 21,            "restOffsetMeters": [-0.0, -0.058474925, 0.160658266]},
+    {"index": 23, "name": "LeftUpLeg",       "parent": 0,             "restOffsetMeters": [0.0949182, -0.0277289, 0.0]},
+    {"index": 24, "name": "LeftLeg",         "parent": 23,            "restOffsetMeters": [0.0, -0.412118, 0.0]},
+    {"index": 25, "name": "LeftFoot",        "parent": 24,            "restOffsetMeters": [-0.0, -0.456091, 0.0]},
+    {"index": 26, "name": "LeftToeBase",     "parent": 25,            "restOffsetMeters": [-0.0, -0.058474925, 0.160658266]}
   ],
   "jointCount": 27,
   "root": "Hips",
@@ -51,11 +51,11 @@
     "note": "角色朝 +Z，右手在 -X；ARDY exports/mujoco.py:29-30 官方 docstring 'y up and z forward, right handed'；joints.p 脚趾 z=+0.16、右手 x=-0.72 印证"
   },
   "restOffsets": {
-    "source": "assets/skeletons/cskel27/joints.p (neutral_joints, [27,3] float64)",
-    "computedAs": "OFFSET[j] = neutral_joints[j] - neutral_joints[parent[j]]",
+    "source": "ardy/assets/skeletons/cskel27/joints.p (neutral_joints, [27,3] float64; torch.load)",
+    "computedAs": "OFFSET[j] = neutral_joints[j] - neutral_joints[parent[j]]; 值内联于上方 joints[].restOffsetMeters",
     "rootOffset": [0, 0, 0],
     "valuesMeters": true,
-    "note": "joints.p 即官方标准 T-pose（bvh.py:564-568 注释证实）；不与目标模型拟合"
+    "note": "joints.p 即官方标准 T-pose（bvh.py:564-568 注释证实）；不与目标模型拟合。restOffsetMeters 为从官方 joints.p 全精度重算（见 reports/phase1-ardy-rest-offsets.md 证据）"
   },
   "timing": {
     "fps": 20,
@@ -77,10 +77,10 @@
     "note": "转换器不做 root 平滑/修正/去滑步；原样写入"
   },
   "endSites": {
-    "strategy": "6 个叶关节保持 JOINT（带 3 旋转通道），各加一个 End Site 子节点",
-    "leafJoints": ["RightHandEnd", "LeftHandEnd", "RightHandThumb1", "LeftHandThumb1", "RightToeBase", "LeftToeBase"],
+    "strategy": "7 个叶关节保持 JOINT（带 3 旋转通道），各加一个 End Site 子节点",
+    "leafJoints": ["Head", "RightHandEnd", "LeftHandEnd", "RightHandThumb1", "LeftHandThumb1", "RightToeBase", "LeftToeBase"],
     "stubOffsetHintMeters": [0.02, 0.05],
-    "note": "RightHandEnd/LeftHandEnd 是真实手尖 marker（距手约 7cm）；Thumb1 是单节拇指叶；ToeBase 是真实脚趾关节。End Site 不从目标 rig 补全"
+    "note": "转换器从固定层级自动推断叶节点（children 为空 = 叶）：Head（Neck 的单子）、RightHandEnd/LeftHandEnd（真实手尖 marker，距手约 7cm）、Thumb1（单节拇指叶）、ToeBase（真实脚趾关节）。End Site stub 方向 = 叶关节 rest offset 方向、长度 0.02 m；不从目标 rig 补全。Phase 0 草案曾漏列 Head，2026-08-26 修正为 7 叶"
   },
   "forbiddenCli": [
     "--target-model",
