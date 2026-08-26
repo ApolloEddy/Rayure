@@ -17,7 +17,6 @@ tools/rig-pipeline/
     pipeline-failure.v1.schema.json   # Phase 1
   blender/
     rig_bridge_driver.py       # Phase 2：最薄 Blender driver，只调公开 API
-    poc_retarget_and_bake.py   # Phase 2
     build_character_bundle.py  # Phase 3（POC-PASS 后）
   verify/
     blender_bvh_dump.py        # Phase 1：Blender 原生 importer round-trip dump
@@ -54,7 +53,7 @@ baked Actions → GLB + character bundle manifest → Rayure 纯播放（GLTFLoa
 
 - **Phase 0（✅ 完成）**：工具链锁定 ✅、ARDY profile 草案 ✅、基线审计 ✅（8 条 §1.2 声明全部验证）、Rig Bridge headless 启用验证 ✅、PoC 输入矩阵 ✅。
 - **Phase 1（✅ 完成）**：`ardy_to_bvh.py` 严格转换器（零目标模型知识）+ `pipeline-failure.v1` schema（14 code）+ 31 个 unittest 通过 + golden fixture + Blender 原生 importer round-trip **PASS**（旋转 0.0319°≤0.25°、根平移 0.01µm≤1mm、fps=20）。详见 `reports/phase1-verification.md`。
-- **Phase 2（待开始）**：Rig Bridge retarget/bake PoC → `POC-PASS`/`POC-FAIL`。
+- **Phase 2（⚠️ POC-FAIL，已停在证据门）**：`blender/rig_bridge_driver.py` 已完成 HRS-only 的直接导入 → posture gate → `auto_guess` → 语义审计 → retarget/bake → GLB 导出/clean import。VRM 参考槽位与一个 FBX 容器槽位各自的 3 类动作均通过；MMD 槽位出现可执行但 12/15 核心角色 off-by-one，Rigify/custom 槽位未通过 HRS 自动执行门。两类通过样本实际都被 HRS 识别为 `VRM/VRoid`，尚未覆盖 3 个独立 rig 家族，故不进入 Phase 3。详见 `reports/phase2-poc-evidence.md`。
 - **Phase 3–8**：`POC-PASS` 门禁通过后才进入生产重构。
 
 ## 约束速查（spec §3）

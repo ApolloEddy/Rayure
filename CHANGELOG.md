@@ -4,6 +4,13 @@
 
 ## [Unreleased] - 2026-08-26
 
+### 离线骨架标准化与烘焙动作管线（Phase 2 — HRS-only PoC，`POC-FAIL`）
+
+- 新增 `tools/rig-pipeline/blender/rig_bridge_driver.py`：以 Blender headless 为边界，按原始格式直接导入目标模型，执行严格世界姿态门、HRS `auto_guess` → 角色语义审计 → `execute_retarget`/bake、目标 rig 指纹检查、GLB 导出和无 addon clean import；driver 不包含 alias、猜骨、手工 slot 或第二套 retarget 算法；
+- 修复 Blender glTF `ACTIONS` 导出会把目标 FBX 自带 Action 一并写入产物的问题：导出窗口只保留本次 `rayure__...` baked Action，clean import 回归确认每个通过样本只有目标 clip；
+- 完成 4 槽位 × 3 类动作的 HRS-only 预检：VRM reference 与一个 FBX container 各 3/3 通过，MMD/复杂变形 rig 因 12/15 核心角色 off-by-one 失败，Rigify/custom `.blend` 因 HRS 自动执行门失败；两个通过样本实际均为 `VRM/VRoid` target profile，故未满足至少 3 个 rig 家族与 3/4 门禁；
+- 新增脱敏证据 `tools/rig-pipeline/reports/phase2-poc-evidence.md`；Phase 2 停在证据门，未修改生产 runtime、协议或 `apps/`/`packages/`，未进入 Phase 3；Auto-Rig Pro 不在本项目路径中使用。
+
 ### 离线骨架标准化与烘焙动作管线（Phase 0 — 基线/工具链/审计）
 
 - 新增 `docs/Rayure_RigBridge_BVH_BakedMotion_Development_Spec.md` 驱动的离线管线开发入口：把 3D 动作架构从「运行时识别骨架 + 适配动作」迁移为「Blender 离线识别 + 第三方工具（Rig Bridge / Humanoid Remap Studio）retarget + 烘焙后运行时纯播放」，分 Phase 0–8 推进，POC-PASS 门禁前不改生产代码 / `apps/` / `packages/`；
