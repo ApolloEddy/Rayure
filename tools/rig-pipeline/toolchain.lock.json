@@ -1,0 +1,105 @@
+{
+  "schema": "rayure.rig-pipeline.toolchain-lock.v1",
+  "lockedAt": "2026-08-26",
+  "note": "Locked during Phase 0 capability audit. All hashes verified on the build host at lock time. github.com is unreachable from the build host; extensions.blender.org and download.blender.org are reachable.",
+  "ardy": {
+    "upstream": "https://github.com/nv-tlabs/ardy",
+    "upstreamUnreachable": true,
+    "localCheckout": "D:/Dev/ardy-spike/ardy",
+    "packageVersion": "0.2.0",
+    "pinnedModel": "ARDY-Core-RP-20FPS-Horizon40",
+    "fps": 20,
+    "units": "meters",
+    "coordinateSystem": "right-handed, y-up, z-forward (character faces +Z, right hand at -X)",
+    "skeleton": "CoreSkeleton27 (cskel27, 27 joints)",
+    "restOffsetsSource": "assets/skeletons/cskel27/joints.p (standard T-pose, Hips at origin)",
+    "contentFingerprints": {
+      "skeleton/definitions.py": "790ecd42819c3bc35e61631925671c5b8d757c1932045ab55bffb713db91033a",
+      "skeleton/bvh.py": "2aeea04251713ab2757fdf1bcd978189707ba7f60c78ddb833c7000e36984bd8",
+      "skeleton/transforms.py": "b845b90bc1f6ac350cf7325d0bcd08e54f2ce4d255171c20ef3e5d0c32946969",
+      "motion_rep/reps/ardy_motionrep.py": "83231aac1b2e77b34e3dcd3d71f97b92f5b73537d1d2ca8915b53128aa3b5980",
+      "assets/skeletons/cskel27/joints.p": "5e1d60cb1935c2ea50c6978848697d83efde5621cbbc287891ddae3ba55dde61"
+    }
+  },
+  "blender": {
+    "version": "4.2.23",
+    "flavor": "LTS",
+    "downloadUrl": "https://download.blender.org/release/Blender4.2/blender-4.2.23-windows-x64.zip",
+    "localPath": "scratch/rig-pipeline-poc/tools/blender-4.2.23-windows-x64.zip",
+    "sha256": "82e791475779a7342424a480bdde9a20b43710da9264c60346125aa16cd910cb",
+    "bytes": 383193007,
+    "buildDate": "2026-07-21",
+    "portableInstall": "scratch/rig-pipeline-poc/tools/blender-4.2.23-windows-x64/",
+    "headlessInvocation": {
+      "envVars": {
+        "BLENDER_USER_CONFIG": "<portableInstall>/4.2/config",
+        "BLENDER_USER_SCRIPTS": "<portableInstall>/4.2/scripts",
+        "BLENDER_USER_EXTENSIONS": "<portableInstall>/4.2/extensions"
+      },
+      "note": "Without these env vars the portable build resolves user resources to %APPDATA%\\Blender Foundation\\Blender\\4.2 (observed 2026-08-26). Setting them keeps config/scripts/extensions fully inside the portable dir.",
+      "extensionRepoLayout": "extensions/user_default/ (underscore) — NOT extensions/user/default/. Blender 4.2 creates the User Default repo at extensions/user_default; the slash form is never scanned.",
+      "enableInvocations": [
+        "bpy.ops.preferences.addon_enable(module='bl_ext.user_default.humanoid_remap_studio')"
+      ],
+      "verifiedHeadless": true,
+      "verifiedOn": "2026-08-26"
+    },
+    "gltfExporter": {
+      "module": "io_scene_gltf2",
+      "bundled": true,
+      "version": null,
+      "note": "Ships inside the Blender 4.2.23 zip at 4.2/scripts/addons_core/io_scene_gltf2/; no independent version"
+    },
+    "extensionManager": "bl_pkg (bundled)"
+  },
+  "rigBridge": {
+    "extensionId": "humanoid_remap_studio",
+    "name": "Rig Bridge",
+    "version": "0.1.66",
+    "sourceUrl": "https://extensions.blender.org/add-ons/humanoid-remap-studio/",
+    "downloadUrl": "https://extensions.blender.org/download/sha256:5f0b9c06b10927b984448371f918681e6efb7eb607482842d6343854c686fd71/add-on-humanoid-remap-studio-v0.1.66.zip?repository=%2Fapi%2Fv1%2Fextensions%2F&blender_version_min=4.2.0&blender_version_max=5.3.0",
+    "localPath": "scratch/rig-pipeline-poc/tools/add-on-humanoid-remap-studio-v0.1.66.zip",
+    "sha256": "5f0b9c06b10927b984448371f918681e6efb7eb607482842d6343854c686fd71",
+    "bytes": 86851,
+    "blenderVersionMin": "4.2.0",
+    "blenderVersionMax": "5.3.0",
+    "license": "GPL-3.0-or-later",
+    "maintainer": "帧给你你来K",
+    "website": "https://github.com/qw424886884/rig-bridge (unreachable from build host)",
+    "publicOperators": [
+      "hrs.auto_guess",
+      "hrs.execute_retarget",
+      "hrs.clear_retarget_result",
+      "hrs.pick_armature",
+      "hrs.init_slots",
+      "hrs.assign_selected_bone",
+      "hrs.open_humanoid_canvas"
+    ],
+    "sceneProps": [
+      "hrs_source_armature",
+      "hrs_target_armature",
+      "hrs_source_armature_name",
+      "hrs_target_armature_name",
+      "hrs_can_execute_retarget",
+      "hrs_auto_summary",
+      "hrs_auto_detail",
+      "hrs_retarget_status",
+      "hrs_source_profile",
+      "hrs_target_profile",
+      "hrs_source_mode",
+      "hrs_source_collection"
+    ],
+    "executionGate": "hrs_can_execute_retarget == (source_armature && target_armature && mapping_coverage.ready && posture_gate.passed)",
+    "bakeBehavior": "creates new Action 'Retarget_<source_action>_to_<target.name>' on the target armature; writes hrs_retarget_result/hrs_source_armature/hrs_target_armature/hrs_source_action custom props; never renames or rebuilds target bones",
+    "apiVerified": true,
+    "apiVerificationSource": "extracted addon source at scratch/rig-pipeline-poc/tools/hrs_extracted/",
+    "headlessEnableVerified": true,
+    "headlessEvidence": "background --factory-startup + env vars above: hrs.auto_guess/hrs.execute_retarget/hrs.init_slots/hrs.assign_selected_bone/hrs.pick_armature registered; all 8 gate scene props present (hrs_source_armature..hrs_target_profile). Add-on module resolves to bl_ext.user_default.humanoid_remap_studio."
+  },
+  "bvhMotionRetargeter": {
+    "name": "BVH Motion Retargeter (BacteriaJun)",
+    "unreachable": true,
+    "locked": false,
+    "note": "github.com blocked from build host; version and API cannot be verified; recorded as fallback only and excluded from the lock"
+  }
+}

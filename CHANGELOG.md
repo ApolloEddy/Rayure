@@ -4,6 +4,15 @@
 
 ## [Unreleased] - 2026-08-26
 
+### 离线骨架标准化与烘焙动作管线（Phase 0 — 基线/工具链/审计）
+
+- 新增 `docs/Rayure_RigBridge_BVH_BakedMotion_Development_Spec.md` 驱动的离线管线开发入口：把 3D 动作架构从「运行时识别骨架 + 适配动作」迁移为「Blender 离线识别 + 第三方工具（Rig Bridge / Humanoid Remap Studio）retarget + 烘焙后运行时纯播放」，分 Phase 0–8 推进，POC-PASS 门禁前不改生产代码 / `apps/` / `packages/`；
+- 新增 `tools/rig-pipeline/` 工作区：`toolchain.lock.json`（Blender 4.2.23 LTS + Rig Bridge 0.1.66 + ARDY 本地 checkout 的版本/校验和/公开 API 全量锁定）、`schemas/core-skeleton-27.v1.json`（ARDY 官方 CoreSkeleton27 → BVH profile 草案）、四份 Phase 0 报告（toolchain / ardy-profile / baseline / poc-matrix）；
+- 锁定 Blender 4.2.23 LTS 便携发行（SHA256 82e79147…，headless `--background` 可运行）与 Rig Bridge 0.1.66（SHA256 5f0b9c06…，`bpy.ops.hrs.auto_guess` / `execute_retarget` + 8 个场景门控字段 headless 启用验证通过）；`github.com` 源不可达，全部工具走 `download.blender.org` / `extensions.blender.org`；
+- 记录便携 Blender headless 三个必需环境变量（`BLENDER_USER_CONFIG/SCRIPTS/EXTENSIONS`）与扩展目录坑：4.2 的 User Default repo 是 `extensions/user_default/`（下划线），`user/default/` 不会被扫描；
+- 基线审计确认 spec §1.2 的 8 条运行时适配声明全部成立（`bone-remapper.ts` 自研 alias、`canonical-rig-adapter.ts` world→parent-local 硬适配、`core-bone-names.ts` 候选名表、`MotionController` VMD 专用播放器、网关扩展名白名单无 glb 等），并登记禁改符号清单（`STANDARD_BONE_ALIASES` / `CORE_BONE_CANDIDATES` / `remapModelBones` / `CanonicalMotionRigAdapter` / `resolveBone`）；
+- 记录基线漂移：spec 基线 `94db6e2` → 当前 HEAD `8251c4b` 仅两个恢复性审计修复提交（`a48f2ac`、`8251c4b`），当前 HEAD 上重验后 8 条声明不变。
+
 ### 恢复性审计与修复
 
 #### 修复

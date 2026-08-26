@@ -1,0 +1,107 @@
+{
+  "schema": "rayure.rig-pipeline.core-skeleton-27.v1",
+  "profileVersion": "0.1.0-draft",
+  "status": "draft — Phase 0 形成；需 Phase 1 round-trip（ARDY load_bvh_animation + Blender 原生 BVH importer）数值验证后锁定",
+  "source": {
+    "repo": "https://github.com/nv-tlabs/ardy (官方 CoreSkeleton27)",
+    "definition": "ardy/skeleton/definitions.py class CoreSkeleton27 (name 'cskel27')",
+    "localCheckout": "D:/Dev/ardy-spike/ardy (非 git 副本)",
+    "fingerprints": "见 toolchain.lock.json ardy.contentFingerprints"
+  },
+  "jointSet": [
+    {"index": 0,  "name": "Hips",            "parent": null},
+    {"index": 1,  "name": "Spine",           "parent": "Hips"},
+    {"index": 2,  "name": "Spine1",          "parent": "Spine"},
+    {"index": 3,  "name": "Spine2",          "parent": "Spine1"},
+    {"index": 4,  "name": "Spine3",          "parent": "Spine2"},
+    {"index": 5,  "name": "Neck",            "parent": "Spine3"},
+    {"index": 6,  "name": "Head",            "parent": "Neck"},
+    {"index": 7,  "name": "RightShoulder",   "parent": "Spine3"},
+    {"index": 8,  "name": "RightArm",        "parent": "RightShoulder"},
+    {"index": 9,  "name": "RightForeArm",    "parent": "RightArm"},
+    {"index": 10, "name": "RightHand",       "parent": "RightForeArm"},
+    {"index": 11, "name": "RightHandEnd",    "parent": "RightHand"},
+    {"index": 12, "name": "RightHandThumb1", "parent": "RightHand"},
+    {"index": 13, "name": "LeftShoulder",    "parent": "Spine3"},
+    {"index": 14, "name": "LeftArm",         "parent": "LeftShoulder"},
+    {"index": 15, "name": "LeftForeArm",     "parent": "LeftArm"},
+    {"index": 16, "name": "LeftHand",        "parent": "LeftForeArm"},
+    {"index": 17, "name": "LeftHandEnd",     "parent": "LeftHand"},
+    {"index": 18, "name": "LeftHandThumb1",  "parent": "LeftHand"},
+    {"index": 19, "name": "RightUpLeg",      "parent": "Hips"},
+    {"index": 20, "name": "RightLeg",        "parent": "RightUpLeg"},
+    {"index": 21, "name": "RightFoot",       "parent": "RightLeg"},
+    {"index": 22, "name": "RightToeBase",    "parent": "RightFoot"},
+    {"index": 23, "name": "LeftUpLeg",       "parent": "Hips"},
+    {"index": 24, "name": "LeftLeg",         "parent": "LeftUpLeg"},
+    {"index": 25, "name": "LeftFoot",        "parent": "LeftLeg"},
+    {"index": 26, "name": "LeftToeBase",     "parent": "LeftFoot"}
+  ],
+  "jointCount": 27,
+  "root": "Hips",
+  "units": {
+    "length": "meter",
+    "multiplier": 1.0,
+    "evidence": "cskel27/joints.p 为米制；ARDY bvh.py 输入 BVH 时 cm→m 乘 0.01 反向印证"
+  },
+  "coordinateSystem": {
+    "handedness": "right-handed",
+    "up": "+Y",
+    "forward": "+Z",
+    "note": "角色朝 +Z，右手在 -X；ARDY exports/mujoco.py:29-30 官方 docstring 'y up and z forward, right handed'；joints.p 脚趾 z=+0.16、右手 x=-0.72 印证"
+  },
+  "restOffsets": {
+    "source": "assets/skeletons/cskel27/joints.p (neutral_joints, [27,3] float64)",
+    "computedAs": "OFFSET[j] = neutral_joints[j] - neutral_joints[parent[j]]",
+    "rootOffset": [0, 0, 0],
+    "valuesMeters": true,
+    "note": "joints.p 即官方标准 T-pose（bvh.py:564-568 注释证实）；不与目标模型拟合"
+  },
+  "timing": {
+    "fps": 20,
+    "frameTimeSeconds": 0.05,
+    "resample": "never — 保留输入 FPS 与帧数",
+    "evidence": "checkpoint ARDY-Core-RP-20FPS-Horizon40 config.yaml fps:20；generate.py fps=model.motion_rep.fps"
+  },
+  "channels": {
+    "root": ["Xposition", "Yposition", "Zposition", "Zrotation", "Yrotation", "Xrotation"],
+    "nonRoot": ["Zrotation", "Yrotation", "Xrotation"],
+    "eulerOrder": "ZYX",
+    "degrees": true,
+    "decompose": "scipy Rotation.as_euler('ZYX', degrees=True) 从 3x3 local rotation matrix 反解，按通道顺序写入",
+    "roundTripContract": "ARDY load_bvh_animation 用 scipy Rotation.from_euler(声明的通道字母序, intrinsic) 重建矩阵（skeleton/bvh.py:518-534）；写出的通道顺序必须与 as_euler 反解顺序一致"
+  },
+  "rootMotion": {
+    "rootPositionChannel": "Hips — 直接写 root_positions（世界系米制）",
+    "rootRotationChannel": "Hips — 写 local_rot_mats[:, 0]（根 global rotation，因父为世界）",
+    "note": "转换器不做 root 平滑/修正/去滑步；原样写入"
+  },
+  "endSites": {
+    "strategy": "6 个叶关节保持 JOINT（带 3 旋转通道），各加一个 End Site 子节点",
+    "leafJoints": ["RightHandEnd", "LeftHandEnd", "RightHandThumb1", "LeftHandThumb1", "RightToeBase", "LeftToeBase"],
+    "stubOffsetHintMeters": [0.02, 0.05],
+    "note": "RightHandEnd/LeftHandEnd 是真实手尖 marker（距手约 7cm）；Thumb1 是单节拇指叶；ToeBase 是真实脚趾关节。End Site 不从目标 rig 补全"
+  },
+  "forbiddenCli": [
+    "--target-model",
+    "--bone-map",
+    "--guess-axis",
+    "--scale-to-character",
+    "--fix-feet"
+  ],
+  "inputValidation": {
+    "npzFields": ["local_rot_mats", "root_positions", "fps"],
+    "shapeChecks": [
+      "local_rot_mats [T,27,3,3]",
+      "root_positions [T,3]",
+      "fps 标量且 == 20（或 profile 声明值）",
+      "T >= 1",
+      "所有数值有限（无 NaN/Inf）"
+    ],
+    "failureCodes": ["INPUT_INVALID", "ARDY_REFERENCE_SKELETON_MISSING"]
+  },
+  "determinism": {
+    "requirement": "相同 input bytes + profile + 工具版本 → 相同 BVH hash",
+    "outputHash": "sha256 of .bvh bytes"
+  }
+}
