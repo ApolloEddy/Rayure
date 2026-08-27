@@ -33,7 +33,12 @@ temp/
 server/data/vector_store/
 
 # User-owned character, scene, motion, voice and sensor data stay external.
+# Any assets/ dir at any depth (Genshin-derived models, textures, ardy motion
+# dumps) plus raw model formats are private — never stage with `git add -A`.
 assets/private/
+**/assets/
+*.pmx
+*.vrm
 user-data/
 models/
 motions/
@@ -42,6 +47,10 @@ recordings/
 # Local experiments and purchased scene source files are not distributable.
 scratch/
 apps/wallpaper/public/assets/scenes/
+apps/citlali-tavern/
+
+# Loose scratch screenshot at repo root.
+/screenshot.png
 
 # Machine-local Companion configuration may contain private absolute asset paths.
 rayure.local.json
