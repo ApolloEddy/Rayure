@@ -102,8 +102,7 @@ body[data-rayure-3d-debug="1"] .ardy-3d-surface {
 }
 
 body[data-rayure-3d-debug="1"] .live2d-diagnostics-panel {
-  right: auto;
-  left: clamp(20px, 4vw, 64px);
+  display: none;
 }
 
 .brand {
@@ -332,5 +331,160 @@ body[data-rayure-3d-debug="1"] .live2d-diagnostics-panel {
   max-width: 100%;
   color: rgba(255, 244, 231, 0.56) !important;
   white-space: normal !important;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * ARDY 3D debug workbench control panel.  In `?3dDebug=1` the L2D panel is
+ * hidden and this left-docked surface takes over: it is collapsible and never
+ * covers the rig (the 3D surface fills the rest of the stage).
+ */
+.motion-debug-panel {
+  position: fixed;
+  top: clamp(20px, 4vw, 56px);
+  left: clamp(16px, 3vw, 48px);
+  z-index: 10;
+  width: min(300px, calc(100vw - 32px));
+  border: 1px solid rgba(169, 216, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(13, 20, 28, 0.84);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.32);
+  color: rgba(226, 242, 247, 0.88);
+  backdrop-filter: blur(16px);
+  pointer-events: auto;
+}
+
+.motion-debug-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(169, 216, 255, 0.12);
+}
+
+.motion-debug-panel-header strong {
+  color: #cfe8ff;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.motion-debug-panel-collapse {
+  border: 1px solid rgba(169, 216, 255, 0.28);
+  border-radius: 6px;
+  padding: 2px 8px;
+  background: rgba(169, 216, 255, 0.08);
+  color: rgba(226, 242, 247, 0.88);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.motion-debug-panel.collapsed .motion-debug-panel-body {
+  display: none;
+}
+
+.motion-debug-panel-body {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+}
+
+.motion-debug-panel-label {
+  margin-top: 2px;
+  color: rgba(226, 242, 247, 0.55);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+.motion-debug-panel-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.motion-debug-panel-select {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(169, 216, 255, 0.28);
+  border-radius: 6px;
+  padding: 5px 7px;
+  background: rgba(169, 216, 255, 0.08);
+  color: rgba(226, 242, 247, 0.92);
+  font: inherit;
+  font-size: 10px;
+}
+
+.motion-debug-panel-select:focus {
+  border-color: rgba(169, 216, 255, 0.72);
+  outline: none;
+}
+
+/* The open dropdown renders as the OS-native list, whose default palette can
+   blend into the dark stage (option text = panel text on a dark list).  Pin
+   both backgrounds so the preset/model choices stay legible in any system
+   theme — this is what makes the 14 presets discoverable. */
+.motion-debug-panel-select optgroup,
+.motion-debug-panel-select option {
+  background: #0d1217;
+  color: #dceaf0;
+}
+.motion-debug-panel-select option:disabled {
+  color: rgba(220, 234, 240, 0.42);
+}
+
+
+.motion-debug-panel button {
+  border: 1px solid rgba(169, 216, 255, 0.28);
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: rgba(169, 216, 255, 0.08);
+  color: rgba(226, 242, 247, 0.88);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+
+.motion-debug-panel button:hover,
+.motion-debug-panel button:focus-visible {
+  border-color: rgba(169, 216, 255, 0.7);
+  background: rgba(169, 216, 255, 0.18);
+  outline: none;
+}
+
+.motion-debug-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.motion-debug-panel .motion-debug-panel-primary {
+  flex: 1;
+  border-color: rgba(103, 232, 249, 0.4);
+  background: rgba(103, 232, 249, 0.12);
+  color: #b9f4ff;
+  font-weight: 600;
+}
+
+.motion-debug-panel .motion-debug-panel-primary:hover {
+  border-color: var(--accent);
+  background: rgba(103, 232, 249, 0.2);
+}
+
+.motion-debug-panel label {
+  color: rgba(226, 242, 247, 0.78);
+  font-size: 10px;
+}
+
+.motion-debug-panel-status {
+  display: block;
+  max-width: 100%;
+  margin-top: 2px;
+  color: rgba(190, 215, 226, 0.72);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 9px;
+  white-space: normal;
   overflow-wrap: anywhere;
 }

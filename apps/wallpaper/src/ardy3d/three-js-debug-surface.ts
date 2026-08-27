@@ -10,6 +10,7 @@ import {
   GridHelper,
   Group,
   Material,
+  Matrix4,
   MeshStandardMaterial,
   PerspectiveCamera,
   Scene,
@@ -34,6 +35,18 @@ import { detectRigPositionScale, scaleCanonicalFrame } from './rig-scale.ts'
  * and the Playwright E2E never embed an absolute path into source.
  */
 export const DEFAULT_CORE_SKIN_URL = '/@rayure-assets/core-skin-data.json'
+
+/**
+ * Uploaded local PMX files above this size are rejected before parsing.  Game
+ * exports land well under this (tens of MiB); the guard exists so a mis-chosen
+ * multi-hundred-MB file cannot spike the renderer process into a GPU/tab crash
+ * that blanks the whole debug page (the "white screen" symptom).
+ */
+export const ARDY_PMX_MAX_BYTES = 512 * 1024 * 1024
+
+/** 1×1 transparent PNG — placeholder returned by the blob-URL texture resolver. */
+const TRANSPARENT_PNG_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
 
 export type Ardy3dModelKind = 'core-skin' | 'pmx'
 
@@ -69,6 +82,12 @@ interface GeneratedPlaybackObservation {
   motionId: string
   phase: 'started' | 'progress' | 'completed' | 'cancelled'
   frameIndex: number
+}
+
+/** Bind (rest) pose of a driven bone, captured before any motion frame writes. */
+interface BindPose {
+  matrix: Matrix4
+  matrixWorld: Matrix4
 }
 
 /**
@@ -164,6 +183,20 @@ export class Ardy3dDebugSurface implements Live2dParameterSink {
   #lastPlayback: GeneratedPlaybackObservation | undefined
   #reframeOnPose = false
   #disposed = false
+  /** Bind (rest) pose per driven bone, so playback can return to a static pose. */
+  #bindPoses = new Map<Bone, BindPose>()
+  #loopEnabled = false
+  #loopMotion: CanonicalMotion | undefined
+  #loopDescriptor: MotionDescriptor | undefined
+  /** Guards async model swaps; a superseded load result is dropped. */
+  #swapGeneration = 0
+  /**
+   * Set while the WebGL context is lost (GPU process crash/driver reset).
+   * Rendering pauses; on restore the loop resumes.  Without `preventDefault()`
+   * on the lost event the browser would never fire the restored event, so a
+   * failed GPU turns into a permanently blank canvas — the "white screen".
+   */
+  #contextLost = false
 
   constructor(container: HTMLElement, options: Ardy3dDebugSurfaceOptions) {
     this.#container = container
@@ -187,8 +220,17 @@ export class Ardy3dDebugSurface implements Live2dParameterSink {
       detail: 'Initializing WebGL renderer',
     })
     try {
-      const renderer = new WebGLRenderer({ antialias: true, alpha: false })
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+      // No antialias: MSAA multiplies the fill rate on top of the DPR scaling,
+      // and the first full-res render of a heavy uploaded PMX is what crashed
+      // the user's Edge GPU process (whole page white, browser restart needed).
+      // A diagnostic rig reads fine aliased; a dead GPU reads worse.
+      const renderer = new WebGLRenderer({ antialias: false, alpha: false })
+      // Cap the pixel ratio at 1 for the debug surface: heavy game-export PMX
+      // meshes (many bones/skinning) rendered at a 4K DPR multiply the GPU
+      // fill-rate cost, and on a fragile GPU service that first full-res render
+      // after an upload is exactly what crashed it into the white screen.  A
+      // diagnostic surface does not need retina sharpness.
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1))
       renderer.setClearColor(0x0d0f14, 1)
 
       const wrapper = document.createElement('div')
@@ -197,6 +239,11 @@ export class Ardy3dDebugSurface implements Live2dParameterSink {
       this.#container.append(wrapper)
       this.#wrapper = wrapper
       this.#renderer = renderer
+      // A lost WebGL context renders a dead canvas with no feedback.  Pause the
+      // render loop, surface the failure, and restore when the browser recovers.
+      // `preventDefault()` is what makes the restored event fire at all.
+      renderer.domElement.addEventListener('webglcontextlost', this.#onContextLost, false)
+      renderer.domElement.addEventListener('webglcontextrestored', this.#onContextRestored, false)
 
       const scene = new Scene()
       scene.name = 'rayure-ardy-3d'
@@ -236,6 +283,12 @@ export class Ardy3dDebugSurface implements Live2dParameterSink {
       // the walk stops forcing, so the frozen absolute `matrixWorld` poses the
       // adapter writes are never recompounded through an ancestor.
       renderer.render(scene, camera)
+      // Bind world matrices are settled now; capture them as the rest pose so
+      // `resetToIdle` can return the rig to a static stance after playback.
+      this.#captureBindPoses()
+      // Lock the composed bind world matrices so the per-render scene walk can
+      // never recompound the adapter's absolute poses during playback.
+      this.#freezeModelWorldMatrices()
 
       this.#generated = new CanonicalMotionPlayer(this)
       this.#lastRenderedAt = performance.now()
@@ -282,7 +335,7 @@ export class Ardy3dDebugSurface implements Live2dParameterSink {
   }
 
   get isReady(): boolean {
-    return !this.#disposed && this.#modelLoaded && this.#adapter !== undefined
+    return !this.#disposed && !this.#contextLost && this.#modelLoaded && this.#adapter !== undefined
   }
 
   get modelKind(): Ardy3dModelKind {
@@ -330,6 +383,10 @@ export class Ardy3dDebugSurface implements Live2dParameterSink {
     this.#generated.stop()
     const started = this.#generated.play(motion, descriptor)
     if (started) {
+      // Remember the last successfully-bound motion so loop playback can rebind
+      // it from the start on completion without re-fetching.
+      this.#loopMotion = motion
+      this.#loopDescriptor = descriptor
       this.#reframeOnPose = true
       this.#emitGeneratedPlayback(descriptor.id, 'started', 0, true)
     }
@@ -343,6 +400,99 @@ export class Ardy3dDebugSurface implements Live2dParameterSink {
     const frameIndex = generated.consumedFrameCount
     generated.stop()
     this.#emitGeneratedPlayback(descriptor.id, 'cancelled', frameIndex, true)
+  }
+
+  /**
+   * Loop playback: when the current (or most recently played) motion finishes,
+   * it is rebound from frame 0 instead of stopping.  Toggling off mid-playback
+   * lets the current pass run to completion, then stops as usual.
+   */
+  setLoop(enabled: boolean): void {
+    this.#loopEnabled = enabled
+  }
+
+  get loopEnabled(): boolean {
+    return this.#loopEnabled
+  }
+
+  /**
+   * Returns the rig to its bind (rest) pose — the character's static stance.
+   * Restores the captured bind matrices on every driven bone and re-skins so
+   * the mesh reads as a motionless figure instead of freezing on the last
+   * driven frame.
+   */
+  resetToIdle(): void {
+    const generated = this.#generated
+    if (generated !== undefined) generated.stop()
+    if (this.#bindPoses.size === 0) return
+    for (const [bone, pose] of this.#bindPoses) {
+      bone.matrix.copy(pose.matrix)
+      bone.matrixWorld.copy(pose.matrixWorld)
+      bone.matrixAutoUpdate = false
+      bone.matrixWorldNeedsUpdate = false
+    }
+    for (const skeleton of this.#skeletons) skeleton.update()
+  }
+
+  /** Swaps the debug model: `'core-skin'` reloads the mannequin, any other URL loads that PMX. */
+  async loadModelFromUrl(url: string): Promise<boolean> {
+    if (this.#disposed) return false
+    const generation = ++this.#swapGeneration
+    this.#disposeModel()
+    try {
+      if (url === 'core-skin' || url === '') {
+        await this.#loadCoreSkin()
+      }
+      else {
+        await this.#loadPmx(url)
+      }
+      if (this.#disposed || generation !== this.#swapGeneration) return false
+      this.#frameCamera()
+      this.#addGroundGrid()
+      this.#renderer?.render(this.#scene ?? new Scene(), this.#camera ?? new PerspectiveCamera())
+      this.#captureBindPoses()
+      this.#freezeModelWorldMatrices()
+      this.#reframeOnPose = true
+      this.#emit(this.#snapshot())
+      return true
+    }
+    catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause)
+      this.#modelError = detail
+      this.#modelLoaded = false
+      this.#emit({
+        mode: 'ardy-3d',
+        modelLoaded: false,
+        modelKind: this.#modelKind,
+        modelName: this.#modelName,
+        boneCount: 0,
+        resolvedJointCount: 0,
+        positionScale: this.#positionScale,
+        detail,
+      })
+      return false
+    }
+  }
+
+  /** Loads a local PMX from an uploaded ArrayBuffer (debug model picker). */
+  async loadModelFromArrayBuffer(buffer: ArrayBuffer, name: string): Promise<boolean> {
+    if (this.#disposed) return false
+    if (buffer.byteLength > ARDY_PMX_MAX_BYTES) {
+      this.#modelError = `PMX 文件过大（${(buffer.byteLength / 1048576).toFixed(1)} MiB > ${ARDY_PMX_MAX_BYTES / 1048576} MiB 上限）— 已拒绝，防止渲染进程崩溃`
+      this.#emit(this.#snapshot())
+      return false
+    }
+    let url = ''
+    try {
+      const blob = new Blob([buffer], { type: 'application/octet-stream' })
+      url = URL.createObjectURL(blob)
+      const ok = await this.loadModelFromUrl(url)
+      if (ok) this.#modelName = `PMX file · ${name}`
+      return ok
+    }
+    finally {
+      if (url.length > 0) URL.revokeObjectURL(url)
+    }
   }
 
   snapshot(): Ardy3dDebugSnapshot {
@@ -368,6 +518,7 @@ export class Ardy3dDebugSurface implements Live2dParameterSink {
   dispose(): void {
     if (this.#disposed) return
     this.#disposed = true
+    this.#swapGeneration += 1
     if (this.#animationFrame !== undefined) cancelAnimationFrame(this.#animationFrame)
     this.#animationFrame = undefined
     this.#resizeObserver?.disconnect()
@@ -376,31 +527,83 @@ export class Ardy3dDebugSurface implements Live2dParameterSink {
     this.#controls = undefined
     this.#generated?.dispose()
     this.#generated = undefined
-    this.#adapter?.dispose()
-    this.#adapter = undefined
+    this.#disposeModel()
     const renderer = this.#renderer
     if (renderer !== undefined) {
       renderer.dispose()
       renderer.domElement.remove()
     }
     this.#renderer = undefined
-    if (this.#modelRoot !== undefined) {
+    this.#wrapper?.remove()
+    this.#wrapper = undefined
+    this.#scene = undefined
+    this.#camera = undefined
+  }
+
+  /** Tears down the current model so another can take its place (also on dispose). */
+  #disposeModel(): void {
+    this.#generated?.stop()
+    this.#adapter?.dispose()
+    this.#adapter = undefined
+    this.#skeletons = []
+    this.#bindPoses.clear()
+    this.#loopMotion = undefined
+    this.#loopDescriptor = undefined
+    const root = this.#modelRoot
+    if (root !== undefined) {
+      this.#scene?.remove(root)
       try {
         // disposeMmdModel only reads `root` and `runtime`; the loader's runtime
         // is never started on this surface, so an empty runtime is a no-op.
-        disposeMmdModel({ root: this.#modelRoot, runtime: {} } as unknown as import('../mmd-model-host.ts').LoadableMmdModel)
+        disposeMmdModel({ root, runtime: {} } as unknown as import('../mmd-model-host.ts').LoadableMmdModel)
       }
       catch {
         // A partially-loaded model may not expose all GPU resources yet.
       }
     }
     this.#modelRoot = undefined
-    this.#skeletons = []
-    this.#wrapper?.remove()
-    this.#wrapper = undefined
     this.#modelLoaded = false
-    this.#scene = undefined
-    this.#camera = undefined
+  }
+
+  /**
+   * Records every bone's current matrix/matrixWorld as the static rest pose.
+   * Called once the model is loaded and world matrices are settled but before
+   * any motion frame has been applied, so `resetToIdle` can restore it.  All
+   * bones are captured (not just the resolved subset) because undriven bones
+   * never change and restoring them is a harmless no-op.
+   */
+  #captureBindPoses(): void {
+    this.#bindPoses.clear()
+    for (const skeleton of this.#skeletons) {
+      for (const bone of skeleton.bones) {
+        this.#bindPoses.set(bone, {
+          matrix: bone.matrix.clone(),
+          matrixWorld: bone.matrixWorld.clone(),
+        })
+      }
+    }
+  }
+
+  /**
+   * Locks every node in the model subtree so three.js never recomposes world
+   * matrices from local transforms.  The rig is driven by absolute `matrixWorld`
+   * poses that {@link CanonicalMotionRigAdapter} writes; the per-render scene
+   * walk otherwise recompounds every bone through its (possibly non-driven)
+   * intermediate ancestors — `Object3D.updateMatrixWorld` checks
+   * `matrixWorldAutoUpdate` before multiplying `parent.matrixWorld × matrix`,
+   * so a single flagged node forces that compose across the whole hierarchy and
+   * the driven poses get clobbered until the local matrices converge.  Must run
+   * after the bind-settle render and {@link #captureBindPoses} — the one pass
+   * that is allowed to compose the bind pose.
+   */
+  #freezeModelWorldMatrices(): void {
+    const root = this.#modelRoot
+    if (root === undefined) return
+    root.traverse((node) => {
+      node.matrixAutoUpdate = false
+      node.matrixWorldAutoUpdate = false
+      node.matrixWorldNeedsUpdate = false
+    })
   }
 
   async #loadCoreSkin(): Promise<void> {
@@ -417,7 +620,21 @@ export class Ardy3dDebugSurface implements Live2dParameterSink {
   }
 
   async #loadPmx(url: string): Promise<void> {
-    const model = await this.#loader.loadModel(url, { outline: true, materialRenderOrder: true })
+    // A PMX uploaded through the debug model picker is materialized as a blob
+    // URL, whose opaque origin makes the loader's adjacent-texture resolution
+    // (`new URL('skin.bmp', 'blob:…')`) throw `Invalid URL`.  Game-exported
+    // PMX reference textures we do not ship anyway, so resolve every texture to
+    // a transparent placeholder and let the mannequin material fallback below
+    // carry the rig — HTTP-served models keep their normal adjacent-texture
+    // resolution.  NOTE: the loader wraps this resolver in createTextureResolver,
+    // whose `?? resolveAdjacentTexture` fallback makes `undefined` a trap (it
+    // falls through and re-throws on the blob URL), so a truthy value is required.
+    const loader = url.startsWith('blob:')
+      ? new ThreeMmdLoader({
+          textureResolver: { resolve: async () => TRANSPARENT_PNG_DATA_URL },
+        })
+      : this.#loader
+    const model = await loader.loadModel(url, { outline: true, materialRenderOrder: true })
     const root = model.root
     const bones: Bone[] = []
     const seen = new Set<string>()
@@ -458,8 +675,11 @@ export class Ardy3dDebugSurface implements Live2dParameterSink {
         if (!isDebugMannequinReplacement(materials[i])) continue
         materials[i] = new MeshStandardMaterial({
           color: 0xb8c0c8,
-          emissive: 0x2a333c,
-          roughness: 0.85,
+          // Bright emissive so the rig reads clearly against the dark stage —
+          // this surface exists to verify the motion, not the texture art, and a
+          // silhouette that washes into the background is useless for that.
+          emissive: 0x68747e,
+          roughness: 0.7,
           metalness: 0,
           side: DoubleSide,
         })
@@ -575,8 +795,40 @@ export class Ardy3dDebugSurface implements Live2dParameterSink {
     if (this.#modelLoaded) this.#frameCameraToDrivenPose()
   }
 
+  /**
+   * WebGL context lost (GPU process crash / driver reset): pause the loop and
+   * surface the failure on the snapshot so the debug panel stops claiming the
+   * model is alive behind a blank canvas.  The canvas's own `oncontextlost`
+   * default (context never restored) is suppressed so recovery can happen.
+   */
+  readonly #onContextLost = (event: Event): void => {
+    event.preventDefault()
+    if (this.#disposed || this.#contextLost) return
+    this.#contextLost = true
+    if (this.#animationFrame !== undefined) {
+      cancelAnimationFrame(this.#animationFrame)
+      this.#animationFrame = undefined
+    }
+    this.#modelError = 'WebGL 上下文丢失（GPU 进程可能崩溃）— 渲染已暂停，等待浏览器恢复…'
+    this.#emit(this.#snapshot())
+  }
+
+  readonly #onContextRestored = (): void => {
+    if (this.#disposed || !this.#contextLost) return
+    this.#contextLost = false
+    if (this.#modelError?.includes('WebGL 上下文丢失')) this.#modelError = undefined
+    const renderer = this.#renderer
+    if (renderer !== undefined) {
+      // Re-upload the scene's GPU buffers (wiped by the context loss).
+      renderer.render(this.#scene ?? new Scene(), this.#camera ?? new PerspectiveCamera())
+    }
+    this.#lastRenderedAt = performance.now()
+    this.#animationFrame = requestAnimationFrame(this.#render)
+    this.#emit(this.#snapshot())
+  }
+
   readonly #render = (timestamp: number): void => {
-    if (this.#disposed || this.#renderer === undefined) return
+    if (this.#disposed || this.#contextLost || this.#renderer === undefined) return
     this.#animationFrame = requestAnimationFrame(this.#render)
     const deltaSeconds = Math.min(Math.max(0, timestamp - this.#lastRenderedAt) / 1000, 0.1)
     this.#lastRenderedAt = timestamp
@@ -589,6 +841,13 @@ export class Ardy3dDebugSurface implements Live2dParameterSink {
         const frameIndex = generated.consumedFrameCount
         if (generated.isPlaying) {
           this.#emitGeneratedPlayback(descriptor.id, 'progress', frameIndex)
+        }
+        else if (this.#loopEnabled && this.#loopMotion !== undefined && this.#loopDescriptor !== undefined) {
+          // Loop playback: rebind the same motion from frame 0 instead of
+          // stopping.  The player has just finished, so this is a clean restart.
+          generated.play(this.#loopMotion, this.#loopDescriptor)
+          this.#reframeOnPose = true
+          this.#emitGeneratedPlayback(this.#loopDescriptor.id, 'started', 0, true)
         }
         else {
           this.#emitGeneratedPlayback(descriptor.id, 'completed', frameIndex, true)

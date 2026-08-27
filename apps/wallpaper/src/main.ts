@@ -1,7 +1,7 @@
 import './style.css'
 
 import type { CanonicalMotion, Live2dMotionDescriptor, ModelDescriptor, MotionDescriptor, SpeechDescriptor } from '@rayure/protocol'
-import { parseLive2dCalibration } from '@rayure/protocol'
+import { parseLive2dCalibration, validateCanonicalMotion } from '@rayure/protocol'
 import { CompanionClient } from './companion-client.ts'
 import { loadCanonicalMotion } from './live2d/canonical-motion-client.ts'
 import type { CompanionConnectionSnapshot } from './companion-client.ts'
@@ -23,8 +23,11 @@ import {
 import type { Live2dNativeSnapshot } from './live2d/native-surface.ts'
 import { resolveLive2dCoreUrl } from './live2d/core-source.ts'
 import { buildCalibratedRigProfile, calibrationNeutralPose, resolveLive2dRigProfile } from './live2d/rig-profile.ts'
-import { Ardy3dDebugSurface } from './ardy3d/three-js-debug-surface.ts'
+import { ARDY_PMX_MAX_BYTES, Ardy3dDebugSurface } from './ardy3d/three-js-debug-surface.ts'
 import type { Ardy3dDebugSnapshot } from './ardy3d/three-js-debug-surface.ts'
+import { MotionDebugPanel } from './motion-debug-panel.ts'
+import type { MotionDebugModelChoice, MotionDebugPreset } from './motion-debug-presets.ts'
+import { MOTION_DEBUG_ALL_PRESETS } from './motion-debug-presets.ts'
 import { missingCalibrationControls } from './live2d/calibration-core.ts'
 import { CalibrationWizard } from './live2d/calibration-wizard.ts'
 import type { WallpaperPropertyListener } from './wallpaper-api.ts'
@@ -61,8 +64,28 @@ const ardy3dModelUrlOverride = parseLocal3dDebugUrl(debugQuery.get('3dModelUrl')
 // `data-rayure3d-debug` and mismatch the CSS selector below).
 if (ardy3dDebugEnabled) document.body.setAttribute('data-rayure-3d-debug', '1')
 const live2dDiagnosticsPanel = createLive2dDiagnosticsPanel(
-  live2dParameterProbeEnabled || live2dNativeModelUrl !== undefined || ardy3dDebugEnabled,
+  (live2dParameterProbeEnabled || live2dNativeModelUrl !== undefined) && !ardy3dDebugEnabled,
 )
+
+// The 3D debug view is a dedicated workbench: the diagnostics panel docks to
+// the left as its own control surface, so the L2D panel stays hidden and the
+// rig fills the rest of the stage unobstructed.
+let motionDebugPanel: MotionDebugPanel | undefined
+let motionDebugAutoIdle = true
+if (ardy3dDebugEnabled) {
+  motionDebugPanel = new MotionDebugPanel({
+    onStartPreset: handleMotionDebugStart,
+    onInterrupt: () => ardy3dSurface?.stopGeneratedMotion(),
+    onAbort: handleMotionDebugAbort,
+    onLoopChange: enabled => ardy3dSurface?.setLoop(enabled),
+    onAutoIdleChange: enabled => {
+      motionDebugAutoIdle = enabled
+    },
+    onModelChange: choice => {
+      void handleMotionDebugModelChange(choice)
+    },
+  })
+}
 
 declare global {
   interface Window {
@@ -977,6 +1000,123 @@ function renderArdy3dGeneratedMotionPlayback(observation: {
   renderArdy3dGeneratedMotion(latestGeneratedMotion, state)
 }
 
+/**
+ * Workbench status for the 3D debug panel.  Unlike the L2D panel (hidden in
+ * this view), it tracks both Companion-generated and direct-fixture playback,
+ * and applies the "播完回静止" policy when a non-loop motion completes.
+ */
+function renderMotionDebugPlayback(observation: {
+  motionId: string
+  phase: 'started' | 'progress' | 'completed' | 'cancelled'
+  frameIndex: number
+}): void {
+  const panel = motionDebugPanel
+  if (panel === undefined) return
+  const label = MOTION_DEBUG_ALL_PRESETS.find(preset => preset.id === observation.motionId)?.label ?? observation.motionId
+  if (observation.phase === 'started') {
+    panel.setStatus(`播放「${label}」`)
+  }
+  else if (observation.phase === 'progress') {
+    panel.setStatus(`播放「${label}」· 帧 ${observation.frameIndex}`)
+  }
+  else if (observation.phase === 'completed') {
+    panel.setStatus(`已播完「${label}」`)
+    if (motionDebugAutoIdle) ardy3dSurface?.resetToIdle()
+  }
+  else {
+    panel.setStatus(`已停止「${label}」`)
+  }
+}
+
+function handleMotionDebugStart(preset: MotionDebugPreset): void {
+  const panel = motionDebugPanel
+  const surface = ardy3dSurface
+  if (panel === undefined) return
+  if (surface === undefined || !surface.isReady) {
+    panel.setStatus('3D surface 未就绪（WebGL 初始化中）')
+    return
+  }
+  if (preset.fixtureUrl !== undefined) {
+    void playMotionDebugFixture(preset)
+    return
+  }
+  if (companion.snapshot().phase !== 'connected') {
+    panel.setStatus(`需要 Companion 生成动作（当前 ${companion.snapshot().phase}）`)
+    return
+  }
+  const requestId = companion.requestMotionGeneration({ id: preset.id, prompt: preset.prompt })
+  panel.setStatus(requestId === false ? '生成请求发送失败' : `已请求 ARDY 生成「${preset.label}」`)
+}
+
+/** Direct-play path for dev fixtures: fetch + validate + play, no Companion. */
+async function playMotionDebugFixture(preset: MotionDebugPreset): Promise<void> {
+  const panel = motionDebugPanel
+  const surface = ardy3dSurface
+  if (panel === undefined || surface === undefined || preset.fixtureUrl === undefined) return
+  panel.setStatus(`加载夹具「${preset.label}」…`)
+  try {
+    const response = await fetch(preset.fixtureUrl, { cache: 'no-store' })
+    if (!response.ok) {
+      panel.setStatus(`夹具加载失败 HTTP ${response.status}`)
+      return
+    }
+    const parsed: unknown = await response.json()
+    validateCanonicalMotion(parsed)
+    const descriptor: MotionDescriptor = {
+      format: 'canonical',
+      id: preset.id,
+      displayName: preset.label,
+      url: preset.fixtureUrl,
+    }
+    const started = surface.playGeneratedMotion(parsed as CanonicalMotion, descriptor)
+    panel.setStatus(started ? `播放「${preset.label}」` : '播放被 3D surface 拒绝')
+  }
+  catch (cause) {
+    panel.setStatus(`夹具失败：${cause instanceof Error ? cause.message : String(cause)}`)
+  }
+}
+
+function handleMotionDebugAbort(): void {
+  const panel = motionDebugPanel
+  ardy3dSurface?.stopGeneratedMotion()
+  // Bump the publish guard so a late motion.published from the abandoned ARDY
+  // request is dropped instead of playing over whatever the user starts next.
+  motionPublishedGeneration += 1
+  panel?.setStatus('已中止 · 丢弃未完成的生成')
+}
+
+async function handleMotionDebugModelChange(choice: MotionDebugModelChoice | { file: File }): Promise<void> {
+  const panel = motionDebugPanel
+  const surface = ardy3dSurface
+  if (panel === undefined || surface === undefined) return
+  if ('file' in choice) {
+    // Reject oversized files before allocating an ArrayBuffer: a multi-hundred-MB
+    // parse spike is exactly what crashed the renderer process into the white
+    // screen on upload.  The surface re-checks the buffer as a backstop.
+    if (choice.file.size > ARDY_PMX_MAX_BYTES) {
+      panel.setStatus(
+        `文件过大（${(choice.file.size / 1048576).toFixed(1)} MiB > ${ARDY_PMX_MAX_BYTES / 1048576} MiB 上限）— 已拒绝`,
+      )
+      return
+    }
+    panel.setStatus(`加载本地 PMX「${choice.file.name}」…`)
+    let buffer: ArrayBuffer
+    try {
+      buffer = await choice.file.arrayBuffer()
+    }
+    catch (cause) {
+      panel.setStatus(`读取文件失败：${cause instanceof Error ? cause.message : String(cause)}`)
+      return
+    }
+    const ok = await surface.loadModelFromArrayBuffer(buffer, choice.file.name)
+    panel.setStatus(ok ? `已加载「${choice.file.name}」` : 'PMX 加载失败（详见 3D surface 状态）')
+    return
+  }
+  panel.setStatus(`切换模型「${choice.label}」…`)
+  const ok = await surface.loadModelFromUrl(choice.modelUrl ?? 'core-skin')
+  panel.setStatus(ok ? `已加载「${choice.label}」` : '模型加载失败')
+}
+
 async function maybeStartArdy3dSurface(): Promise<void> {
   if (!ardy3dDebugEnabled || ardy3dSurface !== undefined) return
   const modelUrl = resolveArdy3dModelUrl()
@@ -986,6 +1126,7 @@ async function maybeStartArdy3dSurface(): Promise<void> {
     onGeneratedMotionPlayback: observation => {
       companion.reportMotionPlayback(observation)
       renderArdy3dGeneratedMotionPlayback(observation)
+      renderMotionDebugPlayback(observation)
     },
   })
   ardy3dSurface = surface
