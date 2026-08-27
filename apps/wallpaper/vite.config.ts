@@ -10,6 +10,7 @@ const browserPathShim = fileURLToPath(new URL('./src/live2d/path-browser.ts', im
 const browserNodeBuiltinsShim = fileURLToPath(new URL('./src/browser-node-builtins.ts', import.meta.url))
 const sceneArchiveRoot = fileURLToPath(new URL('../../scratch/japanese_room/public-scenes-archive/', import.meta.url))
 const ardyAssetsRoot = fileURLToPath(new URL('../../scratch/ardy3d/', import.meta.url))
+const ardyMotionFixture = fileURLToPath(new URL('../../.walk-motion.json', import.meta.url))
 
 const SCENE_ROUTE_PREFIX = '/assets/scenes/'
 
@@ -75,6 +76,7 @@ function privateSceneArchivePlugin(): Plugin {
  * instead of the wallpaper knowing an absolute `/@fs/` path:
  *
  *   /@rayure-assets/<file>   scratch/ardy3d/ (core-skin-data.json, *.pmx)
+ *   /@rayure-assets/walk-motion.json   root fixture (dev-only, allowlisted)
  *
  * Dev-only; the production bundle never references these routes.
  */
@@ -101,7 +103,10 @@ function rayureDebugAssetsPlugin(): Plugin {
           const mimeType = fileName.endsWith('.pmx')
             ? 'application/octet-stream'
             : 'application/json; charset=utf-8'
-          serveStatic(res, join(ardyAssetsRoot, fileName), mimeType)
+          const filePath = fileName === 'walk-motion.json'
+            ? ardyMotionFixture
+            : join(ardyAssetsRoot, fileName)
+          serveStatic(res, filePath, mimeType)
           return
         }
         next()

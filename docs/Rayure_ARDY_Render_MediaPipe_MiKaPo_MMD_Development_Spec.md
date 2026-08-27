@@ -1,6 +1,6 @@
 # Rayure ARDY Render Bridge → MediaPipe / MiKaPo → MMD 开发 Spec
 
-状态：**R0 规划冻结，等待实施指令**
+状态：**R0 方案冻结；Phase 0/1 已实现，继续按阶段推进**
 日期：2026-08-27
 目标链路：`ARDY Joints Motion Series → Humanoid RGB Frames / Video → MediaPipe Holistic → MiKaPo → MMD Motion Series`
 首要目标：**先用本地已有 MMD 模型打通并看见完整链路，再讨论产品化**
@@ -656,7 +656,7 @@ LICENSE_GATE_OPEN
 | 层级 | 通过含义 | 本 Spec 当前状态 |
 |---|---|---|
 | A. 文档与契约 | 方案、接口、失败码、门槛清晰 | **R0 已审计（仅文档）** |
-| B. Source renderer | Canonical Motion 可确定性渲染成人形帧 | **未执行** |
+| B. Source renderer | Canonical Motion 可确定性渲染成人形帧 | **已验证（Edge + targeted）** |
 | C. MediaPipe | synthetic humanoid 可稳定产生 Pose33 | **未执行** |
 | D. MiKaPo + 本地 PMX | BoneState 能驱动用户本地模型 | **未执行** |
 | E. VMD roundtrip | VMD 可导出、重载、保持时长/方向 | **未执行** |

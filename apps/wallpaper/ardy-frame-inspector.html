@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" href="data:," />
+    <title>Rayure · ARDY Frame Inspector</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, "Segoe UI Variable", "Segoe UI", sans-serif;
+        background: #071018;
+        color: #e8f6fb;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        min-width: 320px;
+        margin: 0;
+        background:
+          radial-gradient(circle at 20% 0%, rgba(55, 123, 145, 0.27), transparent 38%),
+          radial-gradient(circle at 100% 100%, rgba(103, 232, 249, 0.11), transparent 45%),
+          #071018;
+      }
+
+      button,
+      input { font: inherit; }
+
+      button {
+        min-height: 34px;
+        padding: 6px 11px;
+        border: 1px solid rgba(180, 235, 247, 0.22);
+        border-radius: 8px;
+        background: rgba(23, 47, 58, 0.82);
+        color: inherit;
+        cursor: pointer;
+      }
+
+      button:hover:not(:disabled) { border-color: rgba(103, 232, 249, 0.78); }
+      button:disabled { cursor: not-allowed; opacity: 0.4; }
+
+      main {
+        display: grid;
+        grid-template-columns: minmax(360px, 512px) minmax(300px, 1fr);
+        gap: 18px;
+        width: min(1100px, calc(100vw - 32px));
+        min-height: 100vh;
+        margin: 0 auto;
+        padding: 24px 0;
+      }
+
+      .source-card,
+      .control-card {
+        border: 1px solid rgba(184, 236, 247, 0.14);
+        border-radius: 14px;
+        background: rgba(8, 22, 30, 0.82);
+        box-shadow: 0 18px 54px rgba(0, 0, 0, 0.22);
+      }
+
+      .source-card { display: grid; align-content: start; gap: 12px; padding: 14px; }
+      .source-card h1 { margin: 0; font-size: 17px; font-weight: 650; }
+      .source-card p { margin: 0; color: rgba(214, 238, 245, 0.62); font-size: 12px; line-height: 1.5; }
+
+      #source-canvas {
+        display: block;
+        width: 512px;
+        height: 512px;
+        max-width: 100%;
+        aspect-ratio: 1;
+        border: 1px solid rgba(180, 235, 247, 0.18);
+        border-radius: 10px;
+        background: #101820;
+        image-rendering: auto;
+      }
+
+      .control-card { display: grid; align-content: start; gap: 15px; padding: 18px; }
+      .control-card h2 { margin: 0; font-size: 14px; }
+      .control-card label { display: grid; gap: 7px; color: rgba(214, 238, 245, 0.72); font-size: 12px; }
+      input[type="file"] { width: 100%; color: rgba(230, 247, 252, 0.8); font-size: 12px; }
+      input[type="file"]::file-selector-button { margin-right: 8px; padding: 6px 9px; border: 1px solid rgba(180, 235, 247, 0.2); border-radius: 7px; background: #142b36; color: inherit; }
+      .button-row { display: flex; flex-wrap: wrap; gap: 7px; }
+      .button-row button[data-primary="true"] { border-color: rgba(103, 232, 249, 0.65); color: #a9f3ff; }
+      .status { display: grid; gap: 5px; padding: 10px; border-radius: 9px; background: rgba(2, 10, 15, 0.64); }
+      .status strong { font-size: 12px; }
+      .status code,
+      .metrics code { color: rgba(203, 239, 247, 0.76); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+      .metrics { display: grid; grid-template-columns: auto 1fr; gap: 7px 12px; align-items: baseline; padding-top: 3px; }
+      .metrics span { color: rgba(190, 222, 230, 0.54); font-size: 11px; }
+      .metrics code { text-align: right; }
+      .timeline { display: grid; gap: 7px; }
+      .timeline input { width: 100%; accent-color: #67e8f9; }
+      .hint { color: rgba(190, 222, 230, 0.48); font-size: 11px; line-height: 1.5; }
+
+      @media (max-width: 860px) {
+        main { grid-template-columns: minmax(280px, 512px); justify-content: center; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="source-card" aria-labelledby="source-title">
+        <h1 id="source-title">ARDY Source · CoreSkin27</h1>
+        <p>Phase 1 确定性帧源。画布只包含 CoreSkin 与固定背景，不包含网格、文字或诊断 overlay。</p>
+        <canvas id="source-canvas" width="512" height="512" aria-label="ARDY CoreSkin rendered source"></canvas>
+        <div class="timeline">
+          <input id="frame-slider" type="range" min="0" max="0" value="0" step="1" aria-label="Source frame" disabled />
+          <code id="timeline-label">frame - / -</code>
+        </div>
+      </section>
+
+      <section class="control-card" aria-labelledby="controls-title">
+        <h2 id="controls-title">Frame inspector</h2>
+        <div class="status" role="status" aria-live="polite">
+          <strong id="status-title">初始化中</strong>
+          <code id="status-detail">等待 CoreSkin renderer</code>
+        </div>
+
+        <label>
+          Canonical Motion fixture
+          <div class="button-row">
+            <button id="load-default" type="button" data-primary="true">加载开发 fixture</button>
+            <input id="motion-file" type="file" accept=".json,application/json" aria-label="选择 Canonical Motion JSON" />
+          </div>
+        </label>
+
+        <div class="button-row">
+          <button id="play" type="button" disabled>播放</button>
+          <button id="pause" type="button" disabled>暂停</button>
+          <button id="previous" type="button" disabled>上一帧</button>
+          <button id="next" type="button" disabled>下一帧</button>
+          <button id="reset" type="button" disabled>复位</button>
+        </div>
+
+        <div class="button-row">
+          <button id="record" type="button" disabled>录制 WebM</button>
+          <button id="download-frame" type="button" disabled>下载当前帧 PNG</button>
+        </div>
+
+        <div class="metrics" aria-label="Frame metrics">
+          <span>motion</span><code id="motion-name">-</code>
+          <span>frame</span><code id="frame-value">-</code>
+          <span>media time</span><code id="time-value">-</code>
+          <span>source FPS</span><code id="fps-value">-</code>
+          <span>visible pixels</span><code id="pixels-value">-</code>
+          <span>canvas</span><code id="canvas-value">512 × 512</code>
+        </div>
+
+        <p class="hint">播放、逐帧和录制都调用同一个显式 frame renderer。WebM 是可选旁路，仅用于后续 MiKaPo gold path 调试。</p>
+      </section>
+    </main>
+    <script type="module" src="/src/ardy3d/frame-inspector.ts"></script>
+  </body>
+</html>
