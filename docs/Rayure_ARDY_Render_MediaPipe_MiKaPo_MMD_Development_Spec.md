@@ -1,6 +1,6 @@
 # Rayure ARDY Render Bridge → MediaPipe / MiKaPo → MMD 开发 Spec
 
-状态：**R0 方案冻结；Phase 0/1 已实现，继续按阶段推进**
+状态：**R0 方案冻结；Phase 0/1/2 已实现，Phase 3 Workbench 开发中**
 日期：2026-08-27
 目标链路：`ARDY Joints Motion Series → Humanoid RGB Frames / Video → MediaPipe Holistic → MiKaPo → MMD Motion Series`
 首要目标：**先用本地已有 MMD 模型打通并看见完整链路，再讨论产品化**
@@ -657,9 +657,9 @@ LICENSE_GATE_OPEN
 |---|---|---|
 | A. 文档与契约 | 方案、接口、失败码、门槛清晰 | **R0 已审计（仅文档）** |
 | B. Source renderer | Canonical Motion 可确定性渲染成人形帧 | **已验证（Edge + targeted）** |
-| C. MediaPipe | synthetic humanoid 可稳定产生 Pose33 | **未执行** |
-| D. MiKaPo + 本地 PMX | BoneState 能驱动用户本地模型 | **未执行** |
-| E. VMD roundtrip | VMD 可导出、重载、保持时长/方向 | **未执行** |
+| C. MediaPipe | synthetic humanoid 可稳定产生 Pose33 | **已验证（MiKaPo gold video + Edge）** |
+| D. MiKaPo + 本地 PMX | BoneState 能驱动用户本地模型 | **已验证（外部 PMX + Edge）** |
+| E. VMD roundtrip | VMD 可导出、重载、保持时长/方向 | **结构/时长已验证；同页可操作重载待 Phase 3** |
 | F. 单页 Workbench | 三面板可操作、可逐帧诊断 | **未执行** |
 | G. 实时 ARDY | 真 inference/continuation 持续驱动 | **未执行** |
 | H. Wallpaper Engine CEF | 真实 CEF、控制台、长时间运行 | **未执行** |
