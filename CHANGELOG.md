@@ -2,6 +2,26 @@
 
 本项目的所有重要变更都会记录在此文件中。
 
+## [Unreleased] - 2026-08-28
+
+### 新增
+
+- 新增 ARDY 3D 调试工作台（`?3dDebug=1`）与左停靠「ARDY 3D 调试台」控制面板（`motion-debug-panel.ts` / `motion-debug-presets.ts`）：内置 CoreSkin27 官方人偶、`albedo.pmx` 开发夹具与本机 `.pmx` 上传三种模型来源；14 个动作预设（13 个 LLM2Vec 语义生成 + 1 个无需 Companion/GPU 的本地步行夹具直放）；开始/中断/中止、循环播放与「播完回静止」控制；面板纯 UI，所有动作经回调冒泡到 `main.ts` 保持 Companion/surface 接线；
+- 新增本地 PMX 上传保护：`ARDY_PMX_MAX_BYTES`（512 MiB）在解析前拒绝超大文件，blob URL 纹理解析为透明占位图，防止上传重型模型把渲染进程挤进 GPU/标签页崩溃（白屏）；
+- 新增 WebGL 上下文丢失/恢复处理：`preventDefault()` 保证恢复事件触发，丢失时暂停渲染循环并在快照上报错，浏览器恢复后自动续跑；调试表面关闭抗锯齿并把像素比封顶为 1，降低重型 PMX 的填充率开销；
+- 新增 `resetToIdle`（恢复捕获的绑定姿态，让 rig 播完回到静态站姿）、`setLoop` 循环重绑与模型切换 generation 守卫；
+- 新增 `#freezeModelWorldMatrices`：绑定渲染后冻结每个节点的 `matrixWorldAutoUpdate`，阻止每帧场景遍历重算适配器写入的绝对位姿；
+- 新增确定性 CoreSkin 帧检查器（`ardy-frame-inspector.html` + `core-skin-frame-source.ts` + `frame-inspector.ts` + 测试），并锁定 ARDY→MediaPipe/MiKaPo PoC 的 phase 0/1 边界、记录 gold path（`docs/acceptance/ardy-mikapo-phase{0,1,2}.md` 与 `docs/Rayure_ARDY_Render_MediaPipe_MiKaPo_MMD_Development_Spec.md`）；
+- `.gitignore` 补 `**/assets/`、`*.pmx`、`*.vrm`、`apps/citlali-tavern/`、`/screenshot.png`，私有角色/动作/场景素材不进入 `git add -A`。
+
+### 变更
+
+- `?3dDebug=1` 下隐藏 Live2D 诊断面板（3D 调试台独占舞台），移除旧的左停靠 CSS。
+
+### 验证
+
+- 全工作区 TypeScript 检查通过；`motion-debug-presets.ts` 的语义 prompt 与 AutoDL 批量编码条目逐字一致，预设命中本地语义缓存；夹具直放路径在 Companion 离线时可用。
+
 ## [Unreleased] - 2026-08-25
 
 ### 本次收尾记录

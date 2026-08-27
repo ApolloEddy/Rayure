@@ -45,6 +45,7 @@ Agent 计划中的 replyText -> LiveTalker TTS / fixture / 包外 JSONL 小模�
 
 - Wallpaper Engine 官方 Web wallpaper 项目、用户属性、中英文本地化、FPS 与暂停生命周期；
 - Three.js + `@yohawing/three-mmd-loader` 的外置 PMX、材质和中文纹理加载（冻结基线，主机按需分块加载）；
+- ARDY 3D 调试工作台（`?3dDebug=1`）：确定性 CoreSkin 帧渲染与帧检查器、语义预设/本地夹具直放、本机 PMX 上传、播完回静止与循环播放、WebGL 上下文丢失自恢复；
 - 仅绑定 `127.0.0.1`、固定使用 `/ws` 的 Local Companion；
 - 严格版本化协议、16 KiB 消息上限、未知字段拒绝、握手状态校验，以及仅对当前已发布动作生效的 `motion.playback` 播放回执；
 - 随机会话令牌保护的只读模型/动作网关，以及 Origin、方法、扩展名、大小和 realpath 边界校验；
@@ -80,6 +81,17 @@ Live2D 在 Wallpaper Engine 中默认按“皮套”接入：Companion 会把 `.
 Companion 也会根据可选 `cdi3.json` 中的背景/地板/镜子/粒子等名称做保守的自动识别；显式 `skinHiddenPartIds` 用于模型专属场景层。这里的“原生内容”指模型包内的动作和场景层，Rayure 自己的桌面场景仍由 Rayure 管理。
 
 Wallpaper Engine 的 `project.json` 属性承担当前设置入口：连接端口、强调色、模型缩放、连接状态、Rayure 品牌信息和模型自带内容导入。旧的桌面动作/表情调试栏及 `debugui` 属性已移除，不把开发按钮嵌入正式壁纸；`live2dDebug=1`、`live2dModelUrl`、`live2dNativeScene=1` 仅保留给开发预检使用。
+
+### ARDY 3D 调试工作台（`?3dDebug=1`）
+
+`?3dDebug=1` 打开独立的 3D 调试工作台：左侧停靠一个可折叠的「ARDY 3D 调试台」控制面板（`motion-debug-panel.ts`），用于在浏览器里直接验证动作视觉，不需要 Wallpaper Engine：
+
+- **模型**：内置 CoreSkin27 官方人偶（默认）、`albedo.pmx` 开发夹具，或从本机选择任意 `.pmx` 文件上传；上传超过 512 MiB 会在解析前拒绝，防止渲染进程崩溃白屏；
+- **预设**：14 个动作预设 —— 13 个走 LLM2Vec 语义缓存 + ARDY 生成（`wave.casual`、`walk.forward`、`sit.chair`、`jump.air-turn` 等，prompt 与 AutoDL 批量编码条目逐字一致，直接命中缓存），1 个「本地夹具 · 步行」直接播放，无需 Companion 和 GPU 进程，离线也能看画面；
+- **播放控制**：开始/中断/中止、循环播放、播完回静止（恢复绑定姿态，不冻结在最后一帧）；
+- **韧性**：WebGL 上下文丢失（GPU 进程崩溃/驱动重置）时暂停渲染并上报状态，浏览器恢复后自动续跑；调试表面关闭抗锯齿并把像素比封顶为 1，降低重型 PMX 的填充率开销。
+
+语义预设需要 Companion 与 ARDY Bridge；夹具直放路径完全离线。确定性 CoreSkin 帧检查器（`ardy-frame-inspector.html`）和 ARDY→MediaPipe/MiKaPo PoC 边界见 `docs/Rayure_ARDY_Render_MediaPipe_MiKaPo_MMD_Development_Spec.md` 与 `docs/acceptance/ardy-mikapo-phase{0,1,2}.md`。
 
 ## 当前架构
 
@@ -273,7 +285,7 @@ pnpm dev:wallpaper   # 端口 4173
 - 可由行为层调用 `submitIntent({ ..., target: { entityId: 'tea-cup', joint: 'RightHand', timeMs: 200 } })`；坐标仅形成空间约束，不改变语义 cache key。当前 Bridge 支持 `Hips`、双手和双脚目标，FullBody 约束仍是后续能力；
 - 角色、动作、embedding 缓存、录制和场景素材均被 Git 排除；Renderer 只接收一次性回环 URL，不接收磁盘路径。
 
-调试入口：`?live2dDebug=1`（参数探针、原生动作和 ARDY 生成控件）、`?live2dModelUrl=...`（手动指定模型）、`?live2dCoreUrl=...`（Core 来源）。
+调试入口：`?3dDebug=1`（3D 调试工作台，见上文）、`?live2dDebug=1`（参数探针、原生动作和 ARDY 生成控件）、`?live2dModelUrl=...`（手动指定模型）、`?live2dCoreUrl=...`（Core 来源）。
 
 ## 私有资产与发布边界
 
