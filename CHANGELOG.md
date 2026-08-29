@@ -2,6 +2,23 @@
 
 本项目的所有重要变更都会记录在此文件中。
 
+## [Unreleased] - 2026-08-29
+
+### 新增
+
+- 新增 ARDY → MiKaPo → MMD 全链路统一演示页面（`http://localhost:4000/pipeline`）与独立路由组件 `PipelineView`：打通“ARDY 动作序列 → CoreSkin27 RGB 帧流 → MediaPipe Holistic 33 关键点检测 → MiKaPo 4.2 Solver 解算 → WebGPU MMD 实时渲染”完整通路；
+- 新增统一调试控制面板 `PipelineDebugPanel`：包含 9 个高质量 ARDY 动作预设选择与自定义 JSON 导入、播放/暂停/单帧步进/复位/循环控制、四级管线实时遥测指标（帧率、渲染耗时、有效像素、检测延迟、骨骼解算数）、主要 MMD 关键骨骼欧拉角实时探针（首、双腕、双膝、双踝）以及 `disableIKChains` 步态诊断开关；
+- 新增画中画源监视器与 33 关键点骨骼线 Overlay（`LandmarkOverlay`）：在 512×512 人偶源画面上直观叠加绿色关节连线拓扑，提供实时视觉捕获准确性验证；
+- 新增 9 个高质量 ARDY Canonical Motion 预设（大步前行、快速奔跑、双手挥舞、可爱跳舞、欢呼跳跃、礼貌鞠躬、害羞拒绝、自然待机及基础夹具）至 MiKaPo 静态资源库；
+- 新增自动化端到端验证脚本 `scratch/ardy-mikapo-poc/verify-pipeline-page.mjs` 与单帧步进诊断脚本 `diag-pipeline-frames.mjs`（7/7 测试项全部通过）。
+
+### 修复
+
+- 修复 `canonical-rig-adapter.ts` 在处理关节仅提供四元数数组 `[x,y,z,w]` 格式时抛出 `TypeError: Cannot read properties of undefined (reading '0')` 的问题；
+- 修复 `ardy-frame-source.ts` 对 `frame.rootPosition` 与 `frame.root` 属性命名的兼容性缺失；
+- 修复 `pipeline-view.tsx` 对动作帧时间戳秒/毫秒字段（`time` 与 `timeMs`）的兼容提取，消除了时间标签显示为 `NaNs` 的缺陷；
+- 修复 MediaPipe Web Worker 未发送 `{ type: 'init' }` 导致初始化流程无法触发的问题。
+
 ## [Unreleased] - 2026-08-28
 
 ### 新增
