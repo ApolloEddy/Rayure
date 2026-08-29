@@ -7,10 +7,15 @@
 ### 新增
 
 - 新增 ARDY → MiKaPo → MMD 全链路统一演示页面（`http://localhost:4000/pipeline`）与独立路由组件 `PipelineView`：打通“ARDY 动作序列 → CoreSkin27 RGB 帧流 → MediaPipe Holistic 33 关键点检测 → MiKaPo 4.2 Solver 解算 → WebGPU MMD 实时渲染”完整通路；
-- 新增统一调试控制面板 `PipelineDebugPanel`：包含 9 个高质量 ARDY 动作预设选择与自定义 JSON 导入、播放/暂停/单帧步进/复位/循环控制、四级管线实时遥测指标（帧率、渲染耗时、有效像素、检测延迟、骨骼解算数）、主要 MMD 关键骨骼欧拉角实时探针（首、双腕、双膝、双踝）以及 `disableIKChains` 步态诊断开关；
+- 新增统一调试控制面板 `PipelineDebugPanel`：包含 8 个真实 ARDY 生成候选与自定义 JSON 导入、播放/暂停/单帧步进/复位/循环控制、四级管线实时遥测指标（帧率、渲染耗时、有效像素、检测延迟、骨骼解算数）、主要 MMD 关键骨骼欧拉角实时探针（首、双腕、双膝、双踝）以及 `disableIKChains` 步态诊断开关；
 - 新增画中画源监视器与 33 关键点骨骼线 Overlay（`LandmarkOverlay`）：在 512×512 人偶源画面上直观叠加绿色关节连线拓扑，提供实时视觉捕获准确性验证；
-- 新增 9 个高质量 ARDY Canonical Motion 预设（大步前行、快速奔跑、双手挥舞、可爱跳舞、欢呼跳跃、礼貌鞠躬、害羞拒绝、自然待机及基础夹具）至 MiKaPo 静态资源库；
+- 演示页的候选动作改为提交到回环 Companion 进行真实 ARDY 生成；生成的 Canonical Motion 通过严格校验后自动装载并播放，不再把静态动作夹具混入候选下拉框；
 - 新增自动化端到端验证脚本 `scratch/ardy-mikapo-poc/verify-pipeline-page.mjs` 与单帧步进诊断脚本 `diag-pipeline-frames.mjs`（7/7 测试项全部通过）。
+
+### 验证
+
+- 现场验证 8 个候选均可选择；默认步行与“原地跳跃”均由本机 Companion → ARDY 生成并自动播放，页面遥测同时显示 `33 Landmarks` 与 `51 骨骼驱动`；详细证据见 `docs/acceptance/ardy-mikapo-phase3.md`。
+- `/pipeline` 仍是本机隔离 GPL Workbench 的开发验证入口；其上游源码、私有模型/贴图、权重、缓存和生成结果不进入 Rayure tracked tree、构建产物或发布包。
 
 ### 修复
 
